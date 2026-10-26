@@ -1,0 +1,284 @@
+{
+  "card": "aemeath-cn-v1.json",
+  "research_date": "2026-10-25",
+  "timezone": "Asia/Shanghai",
+  "scope": "中文版爱弥斯的文本人设；用户明确指定其关系对应漂泊者与爱弥斯。应用名称 Ameath 保留。",
+  "method": {
+    "primary_material": "官方发布的视频、角色简介及可核对的中文游戏语音文本。",
+    "community_material": "通过 B 站公开 view/reply 接口读取视频热度和匿名可见的首页热评。没有登录、发送评论或联系任何用户。",
+    "videos_checked": 9,
+    "public_comments_read": 27,
+    "sampling_limit": "本次每个视频的匿名接口实际返回 3 条评论；这是有选择的公开热评样本，并非全量抓取、全站排名或评论区共识统计。",
+    "voice_limit": "以中文语音文本核对表达，不宣称已经逐句听写所有视频或完成音色、声纹还原。",
+    "adaptation": "人设中的桌宠问候和场景例句主要为原创示例，已明确标记，不冒充官方逐字台词。"
+  },
+  "sources": [
+    {
+      "id": "official-pv",
+      "title": "《鸣潮》共鸣者「爱弥斯」PV | 祝福",
+      "url": "https://www.bilibili.com/video/BV1EAFTzeEfY/",
+      "publisher": "鸣潮",
+      "kind": "官方发布",
+      "aid": 116001630852241,
+      "views_at_check": 4400543,
+      "comments_at_check": 18707,
+      "api": "https://api.bilibili.com/x/v2/reply?type=1&oid=116001630852241&sort=2&pn=1&ps=20",
+      "sample_comment_ids": [
+        290615464640,
+        288448514129,
+        288450549377
+      ],
+      "adopted_comment": {
+        "rpid": 288450549377,
+        "likes_at_check": 4338,
+        "paraphrase": "观众把她的行动与歌声分别理解为守护和祝愿。",
+        "use": "保留关心他人与主动行动的双重气质；不把角色简化成只会等待或告别的形象。"
+      },
+      "excluded": "抽卡祝愿和等待更新的玩笑不作为人物口癖。"
+    },
+    {
+      "id": "official-animation",
+      "title": "《鸣潮》动画短片 | 拯救",
+      "url": "https://www.bilibili.com/video/BV13MrQBPEec/",
+      "publisher": "鸣潮",
+      "kind": "官方发布",
+      "aid": 115911067442748,
+      "views_at_check": 6680136,
+      "comments_at_check": 39855,
+      "sample_comment_ids": [
+        286790203281,
+        286770703569,
+        286773992097
+      ],
+      "sample_comment_likes": [
+        3385,
+        4223,
+        3006
+      ],
+      "use": "官方人物资料的交叉参考。评论主要讨论时间线推理，未将推理当成已经证实的角色背景或日常口癖。"
+    },
+    {
+      "id": "pronoun-discussion",
+      "title": "盘点3.1爱弥斯说了多少次「爱」，多少次用「人家」称呼爱弥斯",
+      "url": "https://www.bilibili.com/video/BV1dEFpzBEbF/",
+      "publisher": "卡马尔达",
+      "kind": "社区针对性讨论",
+      "aid": 116028189185859,
+      "views_at_check": 185635,
+      "comments_at_check": 1060,
+      "api": "https://api.bilibili.com/x/v2/reply?type=1&oid=116028189185859&sort=2&pn=1&ps=20",
+      "sample_comment_ids": [
+        291175654384,
+        288986798129,
+        291191489232
+      ],
+      "sample_comment_likes": [
+        5146,
+        1668,
+        3504
+      ],
+      "paraphrase": "高赞讨论强调自然的家人式亲近，并反对依靠重复某个撒娇自称或频繁口头示爱来表达角色。",
+      "use": "以‘我’为日常自称，通过具体关心呈现亲近，不机械堆砌‘人家’。这不是对全部游戏台词作零出现频率断言。",
+      "excluded": "跨游戏比较与挑衅语境没有写入人设。"
+    },
+    {
+      "id": "cn-voice-video",
+      "title": "爱弥斯中配语音合集",
+      "url": "https://www.bilibili.com/video/BV129Fhz2Eng/",
+      "publisher": "炒鸡无敌滑稽",
+      "kind": "游戏语音整理与评论补充",
+      "aid": 116016109588789,
+      "views_at_check": 46764,
+      "comments_at_check": 122,
+      "sample_comment_ids": [
+        290941412624,
+        291023674848,
+        290905414736
+      ],
+      "adopted_comment": {
+        "rpid": 291023674848,
+        "likes_at_check": 100,
+        "paraphrase": "该条评论把角色的表演理解为可爱而机灵。",
+        "use": "仅作轻快、调皮表达的补充线索，未将单条评论包装成社区共识。"
+      },
+      "excluded": "关于演员社交平台和其他配音角色的评论不进入卡片。"
+    },
+    {
+      "id": "high-view-character-discussion",
+      "title": "泛式的爱弥斯角色鉴赏",
+      "url": "https://www.bilibili.com/video/BV13oFzzmEEg/",
+      "publisher": "泛式",
+      "kind": "热门社区视频",
+      "aid": 116021495136721,
+      "views_at_check": 3342218,
+      "comments_at_check": 28468,
+      "sample_comment_ids": [
+        290992503440,
+        288840104929,
+        288815852369
+      ],
+      "sample_comment_likes": [
+        15674,
+        5496,
+        5730
+      ],
+      "use": "核对讨论热度与社区语境。公开返回的评论主要是主播和主角剧情相关玩笑，不从中反推角色的具体说话习惯。"
+    },
+    {
+      "id": "annual-character-analysis",
+      "title": "年度巨献《致爱弥斯》——不乐得·鸣潮细节盘点",
+      "url": "https://www.bilibili.com/video/BV1f9VN6mEYw/",
+      "publisher": "不乐得",
+      "kind": "热门人物细节讨论",
+      "aid": 116640993778509,
+      "views_at_check": 1589056,
+      "comments_at_check": 10879,
+      "sample_comment_ids": [
+        300718154257,
+        300765580977,
+        300711674113
+      ],
+      "sample_comment_likes": [
+        7331,
+        5826,
+        4683
+      ],
+      "use": "确认有较高热度的人物讨论来源。公开热评主要围绕作者创作与回归，未当作爱弥斯语气证据。"
+    },
+    {
+      "id": "character-details",
+      "title": "爱弥斯——突破鸣潮堆料上限的角色",
+      "url": "https://www.bilibili.com/video/BV1cWFhzMEHf/",
+      "publisher": "不乐得",
+      "kind": "人物细节讨论",
+      "aid": 116016445134164,
+      "views_at_check": 986169,
+      "comments_at_check": 4509,
+      "sample_comment_ids": [
+        290862929856,
+        288686469313,
+        288686476337
+      ],
+      "sample_comment_likes": [
+        1641,
+        2057,
+        1188
+      ],
+      "paraphrase": "部分观众关注她希望继续与熟悉的人相处的情感。",
+      "use": "保留重视日常共同生活、分享和并肩的表达；不把评论引述当成新增官方设定。"
+    },
+    {
+      "id": "story-montage",
+      "title": "不乐得的爱弥斯剧情混剪",
+      "url": "https://www.bilibili.com/video/BV17UF8zwEt9/",
+      "publisher": "不乐得",
+      "kind": "社区剧情混剪",
+      "aid": 116016562575565,
+      "views_at_check": 668243,
+      "comments_at_check": 5990,
+      "sample_comment_ids": [
+        288706108993,
+        290872321968,
+        290864788016
+      ],
+      "sample_comment_likes": [
+        5379,
+        2494,
+        2436
+      ],
+      "use": "参考观众对人物羁绊的关注，不搬用完整剧情对白或将玩笑改成人设。"
+    },
+    {
+      "id": "combat-review",
+      "title": "丸子的爱弥斯评测",
+      "url": "https://www.bilibili.com/video/BV18aFwzuEZc/",
+      "publisher": "丸子",
+      "kind": "热门战斗评测",
+      "aid": 116015337839238,
+      "views_at_check": 841998,
+      "comments_at_check": 4263,
+      "sample_comment_ids": [
+        290835640416,
+        290873267248,
+        290878955616
+      ],
+      "sample_comment_likes": [
+        864,
+        417,
+        416
+      ],
+      "use": "战斗和抽卡话题与日常口吻关系较弱，没有据此添加战斗复读、玩家梗或强度口癖。"
+    },
+    {
+      "id": "game-profile-reference",
+      "title": "BWiki 角色资料：爱弥斯",
+      "url": "https://wiki.biligame.com/wutheringwaves/角色/爱弥斯",
+      "kind": "游戏资料整理，非官方编辑机构",
+      "use": "交叉核对学院、学部、适格者和电子幽灵等基本身份；核对初奏短句。"
+    },
+    {
+      "id": "voice-text-reference",
+      "title": "爱弥斯故事和中文语音文本",
+      "url": "https://genshin-builds.com/cn/wuthering-waves/characters/aemeath/info",
+      "kind": "游戏语音文本整理，非官方站点",
+      "use": "核对日常语气词、第一人称与第二人称、轻松到认真的切换，以及希望与漂泊者共同承担责任的表达。卡片没有复制整段台词。"
+    }
+  ],
+  "decisions": [
+    {
+      "aspect": "身份与关系",
+      "source": [
+        "game-profile-reference",
+        "voice-text-reference",
+        "user-request"
+      ],
+      "rule": "用户对应漂泊者；保留共同生活、照料教导、家人式熟悉和彼此守护。"
+    },
+    {
+      "aspect": "自称与语气",
+      "source": [
+        "pronoun-discussion",
+        "voice-text-reference"
+      ],
+      "rule": "以我/你为主；语气词少量使用，不把玩家对比梗改写成口癖。"
+    },
+    {
+      "aspect": "问候",
+      "source": [
+        "game-profile-reference"
+      ],
+      "rule": "核对过的初奏短句仅在合适场景少量使用；其他桌宠问候为原创改编，并按上下文变化。"
+    },
+    {
+      "aspect": "人格层次",
+      "source": [
+        "official-pv",
+        "cn-voice-video",
+        "voice-text-reference"
+      ],
+      "rule": "轻快机灵与坚定主动并存；认真时减少俏皮尾音，关心体现在具体行动。"
+    },
+    {
+      "aspect": "社区内容",
+      "source": [
+        "high-view-character-discussion",
+        "annual-character-analysis",
+        "combat-review"
+      ],
+      "rule": "高热度只用于选样；不把党争、演员经历、抽卡梗或无关高赞评论当作角色设定。"
+    }
+  ],
+  "evaluation": {
+    "schema_validation": "passed",
+    "live_model_attempt": "DeepSeek returned HTTP 402 / insufficient balance; zero model replies were generated.",
+    "scope_of_validation": "Card schema, import and request payload can be checked locally; actual model tone has not yet been verified.",
+    "mode_change": "Existing demo/live preference is preserved because the configured model service has insufficient balance."
+  },
+  "import": {
+    "active_path": "D:\\Violet\\.local\\persona.json",
+    "backup_path": "D:\\Violet\\.local\\persona.before-aemeath-20261025-09f15511.json",
+    "verified_name": "爱弥斯",
+    "user_role": "漂泊者",
+    "existing_mode_preserved": "demo"
+  }
+}

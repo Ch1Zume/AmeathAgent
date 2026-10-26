@@ -1,0 +1,9 @@
+{
+  "kind": "Generated evaluation samples, not official character dialogue",
+  "date": "2026-10-25",
+  "card": "assets\\personas\\aemeath-cn-v1.json",
+  "samples": [],
+  "status": "blocked_insufficient_balance",
+  "http_status": 402,
+  "note": "真实模型调用没有生成样例；人设内容仅完成本地校验。"
+}

@@ -1,0 +1,10 @@
+[project]
+name = "AmeathAgent"
+version = "0.6.1"
+description = "A quiet desktop companion for reading papers."
+requires-python = ">=3.11"
+dependencies = ["PySide6-Essentials>=6.8,<7", "PyMuPDF>=1.26,<2"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

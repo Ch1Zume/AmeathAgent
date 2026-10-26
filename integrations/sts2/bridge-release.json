@@ -1,0 +1,13 @@
+{
+  "project": "https://github.com/CharTyr/STS2-Agent",
+  "version": "v0.16.2",
+  "license": "AGPL-3.0",
+  "source": "https://github.com/CharTyr/STS2-Agent/tree/v0.16.2",
+  "release_url": "https://github.com/CharTyr/STS2-Agent/releases/download/v0.16.2/sts2-ai-agent-v0.16.2-windows.zip",
+  "release_sha256": "97eff7ff6616145dd80103ee5b4f41ec62ad5b519cac3ad9fa83014dbe786a3c",
+  "files": {
+    "STS2AIAgent.dll": "52ad458fd2922306acbdea8cbaf83a9f1daf888a786c43de5a947fe1c2458fd6",
+    "STS2AIAgent.pck": "9823f12951e1cce2dbbe60412141370ec0c2a4e1ee9d520bcfa3a1aafcbac852",
+    "mod_id.json": "f911630e94dd5658525fcce22315b0d5ce280ef5215455ca7684c60245b610f9"
+  }
+}

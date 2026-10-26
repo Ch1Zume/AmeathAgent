@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "tool": "built-in image_gen",
+  "asset": "entrance.png",
+  "layout": {"columns": 4, "rows": 2, "frames": 8, "order": "row-major"},
+  "reference_image": "../snowcap-motion-v2/actions.png",
+  "source_output": "exec-b3e65cce-472f-4c6e-8b5a-96ceeca119f1.png",
+  "reference_scope": "The user described Aemeath's in-game idle as a 2D pixel character appearing/disappearing through a resonance mark. This is an original interpretation using the installed Snowcap identity; no official gameplay frames were extracted or traced.",
+  "official_context": [
+    {"title": "Wuthering Waves Resonator Combat Showcase | Aemeath", "url": "https://www.youtube.com/watch?v=psq5Izh9GHM"},
+    {"title": "鸣潮 共鸣者战斗演示 爱弥斯", "url": "https://www.bilibili.com/video/BV1qZ6yBXEVv"}
+  ],
+  "prompt": "Use case: identity-preserve. Asset type: transparent pixel-art sprite atlas for the Ameath Windows desktop pet, a resonance-materialization entrance animation, inspired by the user's description of Aemeath's 2D pixel idle entrance in Wuthering Waves, not a claim to reproduce exact official frames. Reference image is CHARACTER IDENTITY ONLY: preserve the same pink-haired tiny chibi, white little creature on her head, black cat held in front, purple cape, tiny pale outfit. Generate ONE horizontal row of EXACTLY EIGHT equally sized square cells, laid out as 4 columns by 2 rows in reading order (8 frames total), on genuinely transparent background, with clear empty gutters and absolutely no labels, text, grid lines, background or opaque shadows. Each cell uses identical fixed camera, character center and baseline. This is one sequential animation: frame1 a small pale pink/cyan luminous vertical resonance sigil consisting of five narrow waveform-like bars; frame2 sigil expands into an oval digital ripple with square pixels; frame3 scattered pink pixel blocks loosely suggest character silhouette; frame4 partially assembled tiny chibi upper and lower body amid few square particles; frame5 mostly assembled chibi with dissolving sigil underneath; frame6 complete same chibi with faint fading square sparks; frame7 complete same chibi lifting one hand in a gentle hello; frame8 same chibi neutral standing pose exactly like reference first idle frame. Keep character body SAME size in frames 4-8, bounded inside the same center 70% area. Crisp pixel-art edges and palette matching reference, restrained cyan/magenta light effects, no full-frame halos. All eight frames must be individually separable without effects crossing cell boundaries.",
+  "playback": {"duration_ms": 1800, "exit": "reverse", "interpolation": "crossfade", "final_idle_blend_start": 0.87}
+}

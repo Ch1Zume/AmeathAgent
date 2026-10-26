@@ -1,0 +1,63 @@
+{
+  "generator": "built-in image_gen",
+  "date": "2026-10-25",
+  "assets": [
+    {
+      "path": "rest.png",
+      "columns": 8,
+      "rows": [
+        "sitting-down",
+        "sitting",
+        "standing-up",
+        "sleeping-down",
+        "sleeping",
+        "waking-up"
+      ]
+    },
+    {
+      "path": "flight.png",
+      "columns": 8,
+      "rows": [
+        "takeoff",
+        "hover",
+        "flying-right",
+        "flying-left",
+        "landing"
+      ]
+    }
+  ],
+  "curation": {
+    "flyingRight": [
+      3,
+      4,
+      5,
+      6,
+      5,
+      4,
+      3,
+      4
+    ],
+    "flyingLeft": [
+      0,
+      1,
+      2,
+      3,
+      2,
+      1,
+      0,
+      1
+    ]
+  },
+  "behavior": {
+    "sitAfterTravelMs": 8000,
+    "sitAfterIdleMs": 120000,
+    "sittingBreakMs": 15000,
+    "sleepAfterIdleMs": 300000,
+    "nightHours": "23:00–06:00 local time",
+    "nightSleepAfterIdleMs": 45000
+  },
+  "prompts": [
+    "Use case: identity-preserve.\nAsset type: transparent pixel-art resting and sleeping animation atlas for the SAME existing Snowcap/Ameath desktop pet.\nImage1 is original identity; image2 is the current matching animation style. Preserve chibi pink twin tails, orange star eyes, gold ornaments, blue clip, white/lilac outfit, purple cape, black orange-eyed cat held in arms, tiny white snow-leopard cub and pastel bow on head. Same scale, face, crisp pixel outlines and colors. No new accessories, furniture, text, background or ground shadow. Genuine transparent RGBA.\nExactly 8 equal columns and 6 equal rows, 48 whole-sprite cells. Intended cell 192x208 and canvas1536x1248. Equal cells, at least 8px alpha gap around every sprite, no cell overlap. Fixed ground baseline y=200. Standing character about188px tall; sitting lowers the head naturally without resizing the character. Read each row as one smooth 8-frame sequence from left to right. Small coherent in-betweens, identical poses at adjoining endpoints.\nRow1 SIT DOWN: standing neutral; knees soften; gentle knee bend; lower hips; legs tuck; sit on heels; cape/hair settle; relaxed seated pose hugging cat.\nRow2 SITTING LOOP: same relaxed seated pose throughout, subtle breathing, slow blink and small head tilt, tails and cub gently settle; frame8 matches frame1.\nRow3 STAND UP: relaxed seated; look up; prepare; weight shift forward; knees extend halfway; nearly standing; cloth settles; original neutral standing pose. Cat stays held.\nRow4 FALL ASLEEP: begins in seated pose; eyelids droop; blink slowly; head gently tilts; hug cat closer; eyes close; shoulders soften; cozy seated sleeping pose, cub dozes too.\nRow5 SLEEP LOOP: same cozy seated sleeping pose, BOTH GIRL EYES CLOSED throughout; subtle chest/cape breathing and tiny head nod only, cat curled comfortably in arms, cub asleep on head; frame8 matches frame1. No floating letters or Z symbols.\nRow6 WAKE AND STAND: same seated asleep pose; eyes half-open; raise head; small soft stretch without dropping cat or cub; seated awake; begin rising; almost upright; original neutral standing pose.\nKeep the feet, face proportions, tail volume and accessories consistent. No duplicate characters per cell, cropped body parts, random alternate gestures, inconsistent facing, glossy/vector/3D style.",
+    "Use case: identity-preserve.\nAsset type: transparent pixel-art flight animation atlas for the SAME existing Snowcap/Ameath desktop pet, inspired by the user's character's ability to fly.\nImage1 is original character identity, image2 is matching existing animations. Preserve exact pink twin-tail chibi design, orange star eyes, gold pins/blue hair clip, white/lilac clothes, short purple cape, black cat in arms, tiny white snow-leopard cub and pastel bow on head. The character levitates magically WITHOUT physical wings or added costume. No new weapons, props, text, labels or ground.\nExactly 8 equal columns and 5 equal rows, 40 whole-sprite cells, intended1536x1040 with192x208 cells. Genuine transparent RGBA, clear 8px cell gutters. Consistent body/head scale, no clipping or cell overlap. Each row is a coherent smooth 8-frame animation. Small secondary motion in twin tails, cape, cat and cub.\nRow1 TAKEOFF: original neutral front standing pose; soften knees; small anticipation; release heel contact; feet start tucking; legs fold gently; cloth lifts; stable front-facing hover with knees bent and toes pointed down. Whole body stays inside cell, maintain head scale.\nRow2 HOVER LOOP: front-facing, both feet visibly suspended/tucked and no walking gait. Gentle 3px buoyant bob, hair/cape softly flutter, cat held securely, cub stable. Frame8 connects to frame1.\nRow3 FLY RIGHT LOOP: front-right three-quarter facing RIGHT, suspended feet tucked behind rather than running, slight forward lean, cape and twin tails trail LEFT. Eight coherent small flutter/bob phases. No ground contact. Frame8 connects to frame1.\nRow4 FLY LEFT LOOP: front-left three-quarter facing LEFT, suspended feet tucked, cape/twin tails trail RIGHT, same continuous 8-frame flutter/bob cycle. No walking or ground contact.\nRow5 LANDING: start front-facing hover, lower feet; legs unfold; toes approach ground; gentle foot contact; soft knee bend; recover; hair/cape settle; original neutral standing pose.\nTakeoff first frame and landing last frame match the reference standing pose. No physical wings, heavy glows, opaque floor shadow, checkered background, random arm switches or changed animal count."
+  ]
+}

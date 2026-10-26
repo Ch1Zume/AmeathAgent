@@ -1,0 +1,82 @@
+{
+  "additional_manifest": "lifecycle-generation.json",
+  "generator": "built-in image_gen",
+  "date": "2026-10-25",
+  "reference": "reference.png",
+  "originalSource": "Local Snowcap v1 resource, unchanged.",
+  "assets": [
+    {
+      "path": "movement.png",
+      "columns": 8,
+      "rows": [
+        "right",
+        "left",
+        "up",
+        "down",
+        "up-right",
+        "up-left",
+        "down-right",
+        "down-left"
+      ],
+      "frameCount": 64
+    },
+    {
+      "path": "actions.png",
+      "columns": 8,
+      "rows": [
+        "idle",
+        "waving",
+        "jumping",
+        "turning"
+      ],
+      "frameCount": 32
+    }
+  ],
+  "curation": {
+    "waveFrames": [
+      0,
+      1,
+      2,
+      3,
+      2,
+      1,
+      0,
+      0
+    ],
+    "turnFrames": [
+      "actions row4 col1",
+      "actions row4 col2",
+      "movement right col4",
+      "actions row4 col6",
+      "actions row4 col5",
+      "actions row4 col4",
+      "actions row4 col3",
+      "movement down-left col4"
+    ],
+    "note": "Frame selection corrects inconsistent generated arm sides and facing order; atlas files remain unchanged."
+  },
+  "prompts": [
+    "Use case: identity-preserve.\nAsset type: production transparent pixel-art sprite atlas for the existing Snowcap desktop pet.\nInput image 1 is the exact character identity and pixel style reference, not a UI design.\nCreate a NEW supplementary movement atlas for this SAME character: chibi pink twin-tail girl with bright orange star eyes, tiny gold hair ornaments and pastel blue clip, white/lilac clothes, short purple scarf/cape, holding the SAME small black cat with orange eyes, SAME tiny white spotted snow-leopard cub and blue/pink bow balanced on her head. Preserve exact proportions, costume, colors, crisp dark pixel outlines and small-pixel rendering. Do not redesign or make a bigger head, glossy 3D or vector art.\nCanvas 1536x1664 px, EXACTLY 8 equal columns and 8 equal rows, 64 cells, each cell 192x208. No drawn grid, no labels, no words. Genuine transparent RGBA background, no checkerboard or ground shadow.\nEach cell contains one whole sprite independently centered. Same character scale in every cell, approximately 152 pixels wide by 190 pixels tall, with the feet baseline at y=200 of each cell, leave 6px clear alpha margin on every cell edge. Never touch or overlap adjacent cells.\nAnimation sequence left to right is one continuous 8-frame walk cycle, with small coherent consecutive changes, foot contact -> down -> passing -> up -> opposite contact -> down -> passing -> up. Feet alternate and cloth, twin tails and head cub follow with subtle secondary motion. No random poses. Frame 8 should flow into frame 1. Hold the cat continuously.\nRows TOP TO BOTTOM, exact order:\n1 walking toward screen-right/east, gentle right-facing three-quarter profile.\n2 walking toward screen-left/west, gentle left-facing three-quarter profile.\n3 walking upward/north, rear three-quarter view, show pink twin tails and purple back cape, cat held in front partly occluded.\n4 walking downward/south, front-facing toward viewer.\n5 walking up-right/northeast, rear-right three-quarter.\n6 walking up-left/northwest, rear-left three-quarter.\n7 walking down-right/southeast, front-right three-quarter.\n8 walking down-left/southwest, front-left three-quarter.\nConsistent planted foot baseline, small vertical head bob maximum 3px, no per-frame scale drift. Character identity must remain recognizable in back view. Preserve every accessory. The original idle/actions will remain in use, so match the reference closely.",
+    "Use case: identity-preserve.\nAsset type: supplementary transparent animation atlas for Snowcap / Ameath desktop pet.\nImage 1 is the original character identity and pixel-style reference. Image 2 is the matching new eight-direction movement atlas. Create the SAME character and matching crisp pixel-art outlines, proportions and palette; this sheet must connect smoothly to both reference assets. Pink twin-tail girl, orange star eyes, gold hair ornaments and blue hair clip, white/lilac outfit and short purple cape, holding the SAME black orange-eyed cat at all times, with the SAME tiny white snow-leopard cub and pastel bow sitting on her head.\nCreate ONLY an evenly tiled sprite sheet, no scene or UI, no labels or grid lines. Genuine transparent RGBA background; no opaque background, checkerboard, text, ground or shadow.\nEXACTLY 8 equal columns and 4 equal rows, all cells occupied. Intended canvas 1536x832 with 192x208 cells. Each whole sprite centered with a consistent 190px standing height and baseline at y=200 of its cell. At least 6px alpha padding around every cell. Equal character scale throughout, never clip ears/hair/feet or cross a cell.\nRows top to bottom:\nROW 1 IDLE, eight sequential frames: neutral original front-facing stance, gentle breathing, tiny hair/cub settling, one soft blink, then return exactly to neutral. Not eight random expressions. Frame 8 blends into frame 1.\nROW 2 WAVE, eight sequential frames: neutral stance; paw-hand starting to lift; half-raised; fully raised; small warm wave left; small wave right; hand lowering; same neutral stance. Cat stays held with other arm. The head cub bobs minimally.\nROW 3 JUMP, eight sequential frames: neutral; soft anticipation crouch; push-off; rise; apex with feet 14px higher; descend; soft bent-knee landing with hair/cape follow-through; same neutral stance. Do not scale the body while jumping. Keep the entire action inside each cell.\nROW 4 TURN-IN-PLACE poses: eight standing views rotating gradually clockwise around a fixed foot anchor. Column 1 faces DOWN/front toward viewer, 2 DOWN-RIGHT/front-right three-quarter, 3 RIGHT profile, 4 UP-RIGHT/rear-right three-quarter, 5 UP/rear, 6 UP-LEFT/rear-left three-quarter, 7 LEFT profile, 8 DOWN-LEFT/front-left three-quarter. Same standing pose, no walking or jumping on row4. In back views the cat remains held in front and is partly hidden; show pink twin tails and purple back cape. These 8 poses will be played forwards or backwards for smooth turns.\nPreserve original anatomy and accessory details. Consecutive animation frames must have small coherent differences and neutral endpoints. Avoid inconsistent head size, repeated identical walk feet, glows, blurry edges, glossy/vector/3D render or random extra animals.",
+    "Use case: precise-object-edit / identity-preserve.\nImage 1 is the EDIT TARGET: an 8-column, 4-row transparent Snowcap sprite sheet. Image 2 is the original identity reference.\nRepair the temporal continuity of ONLY rows 2 and 4 in image1. Preserve row1 idle and row3 jumping as closely as possible, preserve the 8x4 equal-cell layout, transparency, scale, feet baseline, pink twins tails, star eyes, gold pins, white cub and bow, black cat and purple cape. Crisp pixel art. Do not redesign the character.\nROW2 WAVE correction: the SAME arm on the VIEWER'S LEFT waves in all 8 cells; the OTHER arm continuously cradles the black cat. No swapping arms. Exactly this progression, left to right:\n1 both hands resting around cat (neutral);\n2 viewer-left hand beginning to lift at the cat's shoulder height;\n3 viewer-left elbow lifted, hand halfway toward the girl's cheek;\n4 viewer-left paw next to cheek/ear, fully raised;\n5 same raised paw rotated a little outward;\n6 same raised paw rotated a little inward;\n7 same paw lowered halfway back toward cat;\n8 both hands resting around cat, identical to frame1.\nThe raising and lowering must have actual in-between poses, not 8 fully raised hands. Keep head and body in the same place throughout.\nROW4 TURN correction: no contradictory left/right views. Eight successive standing directions rotating at equal 45-degree steps in ONE CONSISTENT direction. From left to right:\n1 FRONT facing toward viewer/down.\n2 FRONT-RIGHT three-quarter: nose points toward RIGHT edge, most of face visible.\n3 RIGHT PROFILE: nose points toward RIGHT edge, head in side view.\n4 BACK-RIGHT three-quarter: back of head mostly visible, face/cat only visible on RIGHT edge.\n5 BACK: rear of pink hair and purple cape, no full face visible.\n6 BACK-LEFT three-quarter: back of head mostly visible, face/cat only visible on LEFT edge.\n7 LEFT PROFILE: nose points toward LEFT edge, head in side view.\n8 FRONT-LEFT three-quarter: nose points toward LEFT edge, most of face visible.\nOnly one whole sprite per cell, planted feet, same body height, no extra ground, grid, labels, checkerboard or background. Genuine transparent alpha."
+  ],
+  "selected_files": [
+    {
+      "path": "movement.png",
+      "sha256": "976489103889711ee46588f6f1f530dd2998525efd1adc698f9fa8b37fabf322"
+    },
+    {
+      "path": "actions.png",
+      "sha256": "fe3d405a8d125ea4c5bcf1becc863601120610bb23ddcb9fdec3e5af800a3504"
+    },
+    {
+      "path": "rest.png",
+      "sha256": "efe77cf59bc3373abf995c04ceb71c1da2d1745ba21c026aaa91360e90473ae6"
+    },
+    {
+      "path": "flight.png",
+      "sha256": "540f534a9d486d0a97ff2a10ae51b507dba1e0ff1f5f21b7b9a477c7b0b66082"
+    }
+  ],
+  "runtime_adaptation": "Detect transparent gutters instead of assuming uniform grid spacing; preserve clip scale and foot anchors; curate gesture and facing order."
+}
