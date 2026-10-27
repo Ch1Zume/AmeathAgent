@@ -15,6 +15,7 @@ from .pet import clamp_position
 from .bubbles import BubbleFrame, ReplyBubble
 from .companion_ui import CompanionDialog
 from .input import MessageInput
+from .tts import SpeechQueue
 
 
 class ChatInput(MessageInput):
@@ -25,14 +26,20 @@ class ChatSignals(QObject):
     done = Signal(int, str, object)
     failed = Signal(int, str)
     progress = Signal(int, str)
+    partial = Signal(int, object)
 
 
 class ChatDialog(BubbleFrame):
     AUTO_HIDE_SECONDS = 8.0
+    # Pending rounds are folded into episodes once this many accumulate, keeping
+    # the rounds still inside the 12-message live history out of the summary.
+    EPISODE_BATCH_ROUNDS = 12
+    LIVE_ROUNDS = 6
     user_activity = Signal()
     settings_requested = Signal()
     activity = Signal(str, str)
     responded = Signal(str, str)
+    message_sent = Signal(str)
 
     def __init__(self, config: Config, sheet=None):
         super().__init__()
@@ -50,10 +57,15 @@ class ChatDialog(BubbleFrame):
         self.closing = False
         self.generation = 0
         self.cancelled = threading.Event()
+        self.episode_cancelled = threading.Event()
         self.signals = ChatSignals(self)
         self.signals.done.connect(self.on_reply)
         self.signals.failed.connect(self.on_error)
         self.signals.progress.connect(self.on_progress)
+        self.signals.partial.connect(self.on_partial)
+        self.speech = SpeechQueue(config, self)
+        self.speech.failed.connect(self.on_speech_failed)
+        self.streamed = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(19, 13, 19, 25)
         layout.setSpacing(3)
@@ -110,6 +122,26 @@ class ChatDialog(BubbleFrame):
         self.dismiss_timer.timeout.connect(self._check_auto_hide)
         self.refresh_mode()
         self.refresh_transcript()
+        # Turns left over from the previous run become episodes in the background.
+        self.consolidate_episodes(keep_recent=0)
+
+    def consolidate_episodes(self, *, keep_recent: int):
+        if self.closing or not self.agent.keeps_episodes():
+            return
+        try:
+            if len(self.agent.memory.pending_turns()) <= keep_recent:
+                return
+        except (OSError, sqlite3.Error):
+            return
+        cancelled = self.episode_cancelled
+
+        def run():
+            try:
+                self.agent.consolidate(cancelled, keep_recent=keep_recent)
+            except Exception:
+                pass  # Pending turns stay for the next attempt; chat must not depend on this.
+
+        threading.Thread(target=run, daemon=True, name="ameath-episodes").start()
 
     def refresh_mode(self):
         use_context = self.config.settings.use_companion_context
@@ -170,7 +202,7 @@ class ChatDialog(BubbleFrame):
         self.update()
 
     def refresh_transcript(self):
-        if self.reply_bubble.playing and not self.busy:
+        if self.reply_bubble.playing and (not self.busy or self.streamed):
             return
         self._message_index = len(self.messages) - 1
         if self.busy:
@@ -188,10 +220,11 @@ class ChatDialog(BubbleFrame):
         self._reset_auto_hide()
         self.reposition()
 
-    def show_speech(self, segments, *, animate=False):
+    def show_speech(self, segments, *, animate=False, streaming=False):
         screen = self.anchor.screen() if self.anchor is not None else QGuiApplication.primaryScreen()
         max_height = min(440, screen.availableGeometry().height() - 190) if screen else 440
-        self.reply_bubble.set_sequence(segments, speaker=self.persona_name, animate=animate, max_height=max_height)
+        self.reply_bubble.set_sequence(segments, speaker=self.persona_name, animate=animate, max_height=max_height,
+                                       streaming=streaming)
         self.reply_bubble.show()
         self._reset_auto_hide()
         self.reposition()
@@ -220,6 +253,7 @@ class ChatDialog(BubbleFrame):
         self.messages.append(("assistant", text))
         self.messages = self.messages[-40:]
         self.refresh_transcript()
+        self.speech.extend(speech_segments(text))
         self.reply_bubble.text.setToolTip(tooltip)
         self._reset_auto_hide()
 
@@ -240,7 +274,7 @@ class ChatDialog(BubbleFrame):
             return
         # Focus alone must not pin the bubble forever. Protect active composition,
         # pending replies and menus/dialogs; typing and hovering renew the grace period.
-        if (self.busy or self.reply_bubble.playing or self.input.composing or self._pointer_in_chat()
+        if (self.busy or self.reply_bubble.playing or self.speech.active or self.input.composing or self._pointer_in_chat()
                 or QApplication.activePopupWidget() is not None
                 or QApplication.activeModalWidget() is not None):
             self._last_interaction = time.monotonic()
@@ -270,6 +304,8 @@ class ChatDialog(BubbleFrame):
             self.show_text(self.status.text(), "提示")
             return
         self.input.clear()
+        self.speech.stop()
+        self.message_sent.emit(text)
         self.reply_bubble.stop_playback()
         self.sent.setText("你：" + (text[:29] + "…" if len(text) > 29 else text))
         self.sent.setToolTip(text)
@@ -292,7 +328,8 @@ class ChatDialog(BubbleFrame):
         def run():
             try:
                 reply = self.agent.answer(text, history, cancelled,
-                                          on_retry=lambda message: self.signals.progress.emit(generation, message))
+                                          on_retry=lambda message: self.signals.progress.emit(generation, message),
+                                          on_partial=lambda bubbles: self.signals.partial.emit(generation, bubbles))
                 if not cancelled.is_set() and not self.closing:
                     self.signals.done.emit(generation, text, reply)
             except ModelError as error:
@@ -315,7 +352,11 @@ class ChatDialog(BubbleFrame):
         self.messages = self.messages[-40:]
         self.send.setText("发送")
         self._message_index = len(self.messages) - 1
-        self.show_speech(reply.segments, animate=True)
+        # Continue a streamed reply in place; a retried or reformatted reply replays from the start.
+        if not (self.streamed and self.reply_bubble.extend_sequence(reply.segments, final=True)):
+            self.show_speech(reply.segments, animate=True)
+        self.streamed = False
+        self.speech.extend(reply.segments)
         self.reply_bubble.previous.setEnabled(self._message_index > 0)
         self.reply_bubble.next.setEnabled(False)
         self.status.setText("本地演示 · 固定回复与动作" if reply.demo else f"已回复 · {self.config.settings.model}")
@@ -331,13 +372,34 @@ class ChatDialog(BubbleFrame):
                     self.status.setText("已回复；部分记忆未能保存，可到「记忆与人设」整理。")
         if saved:
             self.status.setText(self.status.text() + f" · 记住了 {saved} 条")
+        if not reply.demo and self.agent.keeps_episodes():
+            try:
+                self.agent.memory.log_turn(text, reply.text)
+                if len(self.agent.memory.pending_turns()) >= self.EPISODE_BATCH_ROUNDS:
+                    self.consolidate_episodes(keep_recent=self.LIVE_ROUNDS)
+            except (OSError, sqlite3.Error):
+                pass
         self.reply_bubble.text.setToolTip(self.status.text())
         if reply.demo:
             self.reply_bubble.speaker.setText(self.persona_name + " · 本地演示")
         self.responded.emit(reply.text, reply.action)
 
+    def on_partial(self, generation: int, bubbles):
+        if generation != self.generation or not self.busy or self.cancelled.is_set() or self.closing:
+            return
+        if not (self.streamed and self.reply_bubble.extend_sequence(bubbles)):
+            self.streamed = True
+            self.show_speech(bubbles, animate=True, streaming=True)
+        self.speech.extend(bubbles)
+
+    def on_speech_failed(self, message: str):
+        self.status.setText(message)
+        self.reply_bubble.text.setToolTip(message)
+
     def on_progress(self, generation: int, message: str):
         if generation == self.generation and self.busy and not self.cancelled.is_set() and not self.closing:
+            self.streamed = False
+            self.speech.stop()
             self.status.setText(message)
             self.show_text("这次回复没生成完整，我再试一下。")
 
@@ -345,6 +407,9 @@ class ChatDialog(BubbleFrame):
         if generation != self.generation or self.cancelled.is_set() or self.closing:
             return
         self.busy = False
+        self.streamed = False
+        self.speech.stop()
+        self.reply_bubble.stop_playback()
         self.send.setText("发送")
         self.messages.append(("notice", message))
         self.refresh_transcript()
@@ -353,6 +418,8 @@ class ChatDialog(BubbleFrame):
 
     def cancel_request(self, *, silent=False):
         was_busy = self.busy
+        self.streamed = False
+        self.speech.stop()
         self.reply_bubble.stop_playback()
         self.cancelled.set()
         self.generation += 1
@@ -366,6 +433,7 @@ class ChatDialog(BubbleFrame):
 
     def new_conversation(self):
         self.cancel_request()
+        self.consolidate_episodes(keep_recent=0)
         self.history.clear()
         self.messages.clear()
         self.last_reply = None
@@ -391,7 +459,9 @@ class ChatDialog(BubbleFrame):
 
     def shutdown(self):
         self.closing = True
+        self.episode_cancelled.set()
         self.cancel_request(silent=True)
+        self.speech.shutdown()
         self.dismiss_timer.stop()
         self.reply_bubble.close()
         self.close()

@@ -21,6 +21,10 @@ class Settings:
     cooldown_seconds: int = 120
     dwell_seconds: int = 35
     thinking: bool = False
+    stream_chat: bool = True
+    tts_enabled: bool = False
+    tts_provider: str = "custom"
+    tts_voice: str = ""
     reasoning_effort: str = "high"
     game_thinking: bool = True
     game_endpoint: str = "http://127.0.0.1:8080"
@@ -31,6 +35,9 @@ class Settings:
     pet_resting: bool = True
     pet_flying: bool = True
     memory_enabled: bool = True
+    session_memory: bool = True
+    proactive_enabled: bool = False
+    proactive_daily_limit: int = 3
     use_companion_context: bool = True
     weather_enabled: bool = True
     weather_city: str = ""
@@ -109,6 +116,9 @@ class Config:
                     raise ValueError("Invalid pet behavior setting")
                 if not isinstance(self.settings.memory_enabled, bool) or not isinstance(self.settings.use_companion_context, bool):
                     raise ValueError("Invalid memory setting")
+                if not isinstance(self.settings.session_memory, bool) or not isinstance(self.settings.proactive_enabled, bool):
+                    raise ValueError("Invalid companion setting")
+                self.settings.proactive_daily_limit = max(1, min(10, int(self.settings.proactive_daily_limit)))
                 self.settings.endpoint = validate_endpoint(self.settings.endpoint)
                 if self.settings.mode not in ("demo", "live") or self.settings.protocol not in ("responses", "chat"):
                     raise ValueError("Invalid settings")
@@ -116,6 +126,10 @@ class Config:
                 self.settings.dwell_seconds = max(15, min(300, int(self.settings.dwell_seconds)))
                 if self.settings.reasoning_effort not in ("low", "high", "max"):
                     raise ValueError("Invalid reasoning effort")
+                if not isinstance(self.settings.tts_enabled, bool) or not isinstance(self.settings.tts_provider, str) or not isinstance(self.settings.tts_voice, str):
+                    raise ValueError("Invalid speech setting")
+                if not isinstance(self.settings.stream_chat, bool):
+                    raise ValueError("Invalid streaming setting")
                 if not isinstance(self.settings.thinking, bool) or not isinstance(self.settings.game_thinking, bool):
                     raise ValueError("Invalid thinking mode")
                 # Migrate the unconfigured v0.1 demo; preserve any existing live provider or key.

@@ -72,6 +72,7 @@ class ReplyBubble(BubbleFrame):
         self.setWindowTitle("AmeathAgent · 回复气泡")
         self.resize(370, 150)
         self.playing = False
+        self.streaming = False
         self._sequence_mode = False
         self._segments = ()
         self._max_height = 440
@@ -141,6 +142,7 @@ class ReplyBubble(BubbleFrame):
 
     def set_message(self, text, *, speaker="爱弥斯", plain=False, max_height=330):
         self.stop_playback()
+        self.streaming = False
         self._sequence_mode = False
         self.header.setObjectName("")
         self.header.setStyleSheet("")
@@ -156,8 +158,10 @@ class ReplyBubble(BubbleFrame):
         self.geometry_changed.emit()
         self.update()
 
-    def set_sequence(self, segments, *, speaker="爱弥斯", animate=True, max_height=440):
+    def set_sequence(self, segments, *, speaker="爱弥斯", animate=True, max_height=440, streaming=False):
         self.stop_playback()
+        # While streaming, playback waits after the last received bubble instead of finishing.
+        self.streaming = streaming
         self._sequence_mode = True
         self._segments = tuple(segments)
         self._max_height = max(130, max_height)
@@ -175,7 +179,7 @@ class ReplyBubble(BubbleFrame):
         self.speech_cards.clear()
         self.speech_texts.clear()
         self.scroll.show()
-        self.playing = bool(animate and self._segments)
+        self.playing = bool(animate and (self._segments or streaming))
         self.reveal_all.setVisible(self.playing)
         if self.playing:
             self._show_next()
@@ -183,6 +187,26 @@ class ReplyBubble(BubbleFrame):
             for part in self._segments:
                 self._append_card(part, fade=False)
         self.update()
+
+    def extend_sequence(self, segments, *, final=False) -> bool:
+        """Append newly arrived bubbles; False when they no longer continue what is shown."""
+        segments = tuple(segments)
+        if not self._sequence_mode or segments[:len(self._segments)] != self._segments:
+            return False
+        self._segments = segments
+        self.text.setMarkdown("\n\n".join(segments))
+        if final:
+            self.streaming = False
+        if not self.playing:
+            for part in segments[len(self.speech_cards):]:
+                self._append_card(part, fade=False)
+        elif self._fade.state() != QPropertyAnimation.State.Running and not self._next_timer.isActive():
+            if len(self.speech_cards) < len(segments):
+                self._show_next()
+            elif not self.streaming:
+                self.stop_playback()
+                self.playback_finished.emit()
+        return True
 
     def _append_card(self, part, *, fade):
         card = QFrame()
@@ -239,6 +263,8 @@ class ReplyBubble(BubbleFrame):
         if not self.playing:
             return
         if len(self.speech_cards) == len(self._segments):
+            if self.streaming:
+                return
             self.stop_playback()
             self.playback_finished.emit()
         else:
@@ -255,6 +281,7 @@ class ReplyBubble(BubbleFrame):
 
     def stop_playback(self):
         self.playing = False
+        self.streaming = False
         self._next_timer.stop()
         self._scroll_timer.stop()
         self._fade.stop()

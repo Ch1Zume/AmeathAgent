@@ -10,6 +10,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 MAX_MEMORIES = 200
+MAX_SHARED_EPISODES = 120
+MAX_LIFE_THREADS = 30
+MAX_PENDING_TURNS = 60
 SENSITIVE = re.compile(r"api[ _-]?key|password|secret|access[ _-]?token|密码|口令|密钥|银行卡|身份证|私钥|验证码|sk-[a-z0-9_-]{8,}", re.I)
 
 
@@ -90,6 +93,10 @@ class CompanionMemory:
         self.path = directory / "companion.sqlite3"
         with self._connect() as db:
             db.execute("CREATE TABLE IF NOT EXISTS memories (id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE COLLATE NOCASE, value TEXT NOT NULL, source TEXT NOT NULL, updated TEXT NOT NULL)")
+            # Shared episodes are real conversations; life threads are the character's
+            # own invented stories. Neither is a user fact, so they live apart from memories.
+            db.execute("CREATE TABLE IF NOT EXISTS episodes (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, topic TEXT NOT NULL, summary TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL)")
+            db.execute("CREATE TABLE IF NOT EXISTS pending_turns (id INTEGER PRIMARY KEY, user TEXT NOT NULL, assistant TEXT NOT NULL, created TEXT NOT NULL)")
 
     @contextmanager
     def _connect(self):
@@ -131,13 +138,91 @@ class CompanionMemory:
             db.execute("DELETE FROM memories WHERE id = ?", (identifier,))
 
     def relevant(self, query: str, limit=12) -> list[dict]:
-        def tokens(text):
-            parts = set(re.findall(r"[a-z0-9_]{2,}", text.lower()))
-            for phrase in re.findall(r"[\u4e00-\u9fff]+", text):
-                parts.update(phrase[index:index + 2] for index in range(len(phrase) - 1))
-            return parts
-
-        terms = tokens(query)
+        terms = _tokens(query)
         memories = self.all()
-        memories.sort(key=lambda item: len(terms & tokens(item["key"] + " " + item["value"])), reverse=True)
+        memories.sort(key=lambda item: len(terms & _tokens(item["key"] + " " + item["value"])), reverse=True)
         return [{"key": item["key"], "value": item["value"]} for item in memories[:max(0, min(12, limit))]]
+
+    # Conversation turns wait here only until they are summarized into episodes.
+    def log_turn(self, user: str, assistant: str):
+        if SENSITIVE.search(user + " " + assistant):
+            return
+        created = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with self._connect() as db:
+            db.execute("INSERT INTO pending_turns (user,assistant,created) VALUES (?,?,?)",
+                       (user[:2000], assistant[:2000], created))
+            db.execute("DELETE FROM pending_turns WHERE id NOT IN (SELECT id FROM pending_turns ORDER BY id DESC LIMIT ?)",
+                       (MAX_PENDING_TURNS,))
+
+    def pending_turns(self) -> list[dict]:
+        with self._connect() as db:
+            return [dict(row) for row in db.execute("SELECT * FROM pending_turns ORDER BY id")]
+
+    def clear_pending(self, through: int | None = None):
+        with self._connect() as db:
+            if through is None:
+                db.execute("DELETE FROM pending_turns")
+            else:
+                db.execute("DELETE FROM pending_turns WHERE id <= ?", (through,))
+
+    def episodes(self, kind: str | None = None) -> list[dict]:
+        with self._connect() as db:
+            if kind is None:
+                rows = db.execute("SELECT * FROM episodes ORDER BY updated DESC, id DESC")
+            else:
+                rows = db.execute("SELECT * FROM episodes WHERE kind = ? ORDER BY updated DESC, id DESC", (kind,))
+            return [dict(row) for row in rows]
+
+    def add_episodes(self, shared: list[str], life: list[tuple[str, str]], *, when: str | None = None):
+        now = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+        when = when or now
+        with self._connect() as db:
+            for summary in shared:
+                if valid_episode("对话", summary):
+                    db.execute("INSERT INTO episodes (kind,topic,summary,created,updated) VALUES ('shared','对话',?,?,?)",
+                               (summary.strip(), when, now))
+            for topic, summary in life:
+                if not valid_episode(topic, summary):
+                    continue
+                topic, summary = topic.strip(), summary.strip()
+                existing = db.execute("SELECT id FROM episodes WHERE kind = 'life' AND topic = ? COLLATE NOCASE", (topic,)).fetchone()
+                if existing:
+                    db.execute("UPDATE episodes SET summary = ?, updated = ? WHERE id = ?", (summary, now, existing["id"]))
+                else:
+                    db.execute("INSERT INTO episodes (kind,topic,summary,created,updated) VALUES ('life',?,?,?,?)",
+                               (topic, summary, when, now))
+            for kind, limit in (("shared", MAX_SHARED_EPISODES), ("life", MAX_LIFE_THREADS)):
+                db.execute("DELETE FROM episodes WHERE kind = ? AND id NOT IN (SELECT id FROM episodes WHERE kind = ? ORDER BY updated DESC, id DESC LIMIT ?)",
+                           (kind, kind, limit))
+
+    def delete_episode(self, identifier: int):
+        with self._connect() as db:
+            db.execute("DELETE FROM episodes WHERE id = ?", (identifier,))
+
+    def clear_episodes(self):
+        with self._connect() as db:
+            db.execute("DELETE FROM episodes")
+            db.execute("DELETE FROM pending_turns")
+
+    def episode_context(self, query: str, *, shared=6, life=4) -> dict:
+        """Recent conversations plus the ones that share words with this message."""
+        records = self.episodes("shared")
+        terms = _tokens(query)
+        chosen = records[:max(0, shared - 2)]
+        related = sorted(records[len(chosen):], key=lambda item: len(terms & _tokens(item["summary"])), reverse=True)
+        chosen += [item for item in related[:2] if terms & _tokens(item["summary"])]
+        chosen.sort(key=lambda item: item["created"])
+        return {"shared": [{"date": item["created"][:10], "summary": item["summary"]} for item in chosen],
+                "life": [{"topic": item["topic"], "summary": item["summary"]} for item in self.episodes("life")[:life]]}
+
+
+def valid_episode(topic: str, summary: str) -> bool:
+    return (isinstance(topic, str) and isinstance(summary, str) and 0 < len(topic.strip()) <= 24
+            and 0 < len(summary.strip()) <= 200 and not SENSITIVE.search(topic + " " + summary))
+
+
+def _tokens(text: str) -> set[str]:
+    parts = set(re.findall(r"[a-z0-9_]{2,}", text.lower()))
+    for phrase in re.findall(r"[一-鿿]+", text):
+        parts.update(phrase[index:index + 2] for index in range(len(phrase) - 1))
+    return parts

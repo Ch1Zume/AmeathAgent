@@ -251,6 +251,9 @@ def test_chat_ui_recovers_empty_reply_once_and_shows_one_final_turn(window):
                 raise ModelResponseError("empty_final")
             return Completion('{"reply":"我在呢。","emotion":"greeting","memory_updates":[]}', {}, "test")
 
+        def stream(self, payload, cancelled, on_text, **kwargs):
+            return self.request(payload, cancelled, **kwargs)
+
     window.chat.agent.client = Client()
     window.open_chat()
     send_and_wait(window.chat, "你好")

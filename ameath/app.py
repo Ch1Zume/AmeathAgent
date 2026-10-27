@@ -23,6 +23,7 @@ from .dialogs import CardsView, SettingsDialog
 from .models import Answer, Question, Source
 from .papers import Paper, make_sample
 from .pet import DesktopPet, PetAvatar, draw_pet
+from .companion import ProactiveCompanion
 from .policy import AttentionPolicy
 from .storage import Notebook
 from .theme import MARKDOWN_STYLE, STYLE
@@ -90,6 +91,14 @@ class AmeathWindow(QMainWindow):
         self.focus_dialog = PomodoroDialog(self.focus, self)
         self.weather = DailyWeather(config, self.pet, self.chat, self)
         self.weather.blocked = lambda: self.focus.breaking or self.busy or self.game_panel.busy
+        self.companion = ProactiveCompanion(config, self.pet, self.chat, self)
+        self.companion.blocked = lambda: self.focus.clock.active or self.weather.busy or bool(self.weather.pending) or self.busy or self.game_panel.busy
+        self.pet.proactive_enabled = config.settings.proactive_enabled
+        self.pet.proactive_changed.connect(self.companion.set_enabled)
+        self.pet.quiet_requested.connect(self.on_quiet_requested)
+        self.pet.activated.connect(self.companion.on_interaction)
+        self.chat.user_activity.connect(self.companion.on_interaction)
+        self.chat.message_sent.connect(self.companion.on_user_message)
         self.pet.busy_provider = lambda: self.busy or self.chat.busy or self.chat.isVisible() or self.focus.breaking or bool(self.pet.transition) or (hasattr(self, "game_panel") and self.game_panel.busy)
         self.chat.activity.connect(self.on_chat_activity)
         self.chat.responded.connect(self.on_chat_reply)
@@ -354,6 +363,10 @@ class AmeathWindow(QMainWindow):
         if not self.exiting and not self.focus.breaking:
             self.pet.set_activity(state)
 
+    def on_quiet_requested(self):
+        self.companion.quiet()
+        self.pet.say("好，我安静两小时，有事点我就行。", "idle")
+
     def on_chat_reply(self, text, action):
         if not self.exiting and not self.focus.breaking:
             self.pet.respond(text, action, show_bubble=False)
@@ -386,6 +399,7 @@ class AmeathWindow(QMainWindow):
         self.cancel_request()
         self.chat.cancel_request(silent=True)
         self.weather.shutdown()
+        self.companion.shutdown()
         self.game_panel.stop()
         self.focus.shutdown()
         self.focus_dialog.hide()
@@ -795,6 +809,7 @@ class AmeathWindow(QMainWindow):
         self.cancelled.set()
         self.observation_timer.stop()
         self.weather.shutdown()
+        self.companion.shutdown()
         self.focus.shutdown()
         self.focus_dialog.close()
         self.chat.shutdown()

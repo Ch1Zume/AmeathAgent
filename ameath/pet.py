@@ -129,6 +129,8 @@ class DesktopPet(QWidget):
     wandering_changed = Signal(bool)
     resting_changed = Signal(bool)
     flying_changed = Signal(bool)
+    proactive_changed = Signal(bool)
+    quiet_requested = Signal()
     animation_changed = Signal(str)
     position_changed = Signal()
     lifecycle_finished = Signal(str)
@@ -173,6 +175,7 @@ class DesktopPet(QWidget):
         self._flight_speed = 160.0
         self.resting_enabled = bool(resting)
         self.flying_enabled = bool(flying)
+        self.proactive_enabled = False
         self._now = time_provider or (lambda: datetime.now().astimezone())
         self.busy_provider = lambda: False
         self._idle_elapsed_ms = 0.0
@@ -532,6 +535,10 @@ class DesktopPet(QWidget):
         self.flying_enabled = bool(enabled)
         self.flying_changed.emit(self.flying_enabled)
 
+    def set_proactive(self, enabled: bool):
+        self.proactive_enabled = bool(enabled)
+        self.proactive_changed.emit(self.proactive_enabled)
+
     def set_wandering(self, enabled: bool):
         self.wandering = bool(enabled)
         self._wander_in_ms = random.uniform(8000, 14000)
@@ -646,6 +653,11 @@ class DesktopPet(QWidget):
         flying.setCheckable(True)
         flying.setChecked(self.flying_enabled)
         flying.toggled.connect(self.set_flying)
+        proactive = menu.addAction("允许主动找我聊")
+        proactive.setCheckable(True)
+        proactive.setChecked(self.proactive_enabled)
+        proactive.toggled.connect(self.set_proactive)
+        menu.addAction("安静两小时", self.quiet_requested.emit)
         menu.addSeparator()
         for text, signal in [("玩杀戮尖塔 2", self.game_requested),
                              ("暂停游玩", self.stop_game_requested), ("解释已复制的文字", self.clipboard_requested),

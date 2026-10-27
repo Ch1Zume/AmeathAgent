@@ -56,6 +56,16 @@ class SettingsDialog(QDialog):
         self.thinking = QCheckBox("阅读与日常对话使用深度思考")
         self.thinking.setChecked(config.settings.thinking)
         form.addRow("日常模式", self.thinking)
+        self.stream_chat = QCheckBox("聊天回复边生成边显示（仅 Chat Completions 接口）")
+        self.stream_chat.setChecked(config.settings.stream_chat)
+        form.addRow("流式显示", self.stream_chat)
+        self.tts_enabled = QCheckBox("朗读回复（需先在 ameath/tts.py 接入语音接口）")
+        self.tts_enabled.setChecked(config.settings.tts_enabled)
+        form.addRow("语音", self.tts_enabled)
+        self.tts_voice = QLineEdit(config.settings.tts_voice)
+        self.tts_voice.setMaxLength(80)
+        self.tts_voice.setPlaceholderText("音色名称，由语音接口自行解释")
+        form.addRow("音色", self.tts_voice)
         self.game_thinking = QCheckBox("游戏决策使用深度思考")
         self.game_thinking.setChecked(config.settings.game_thinking)
         form.addRow("游戏模式", self.game_thinking)
@@ -98,7 +108,7 @@ class SettingsDialog(QDialog):
             current = self.config.settings
             self.config.settings = replace(current, endpoint=endpoint, model=self.model.text().strip(),
                                             mode=self.mode.currentData(), protocol=self.protocol.currentData(),
-                                            thinking=self.thinking.isChecked(), game_thinking=self.game_thinking.isChecked(),
+                                            thinking=self.thinking.isChecked(), stream_chat=self.stream_chat.isChecked(), tts_enabled=self.tts_enabled.isChecked(), tts_voice=self.tts_voice.text().strip(), game_thinking=self.game_thinking.isChecked(),
                                             reasoning_effort=self.effort.currentData())
             self.config.save()
         except (ValueError, OSError) as error:

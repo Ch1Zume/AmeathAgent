@@ -148,8 +148,8 @@ class ModelClient:
     def __init__(self, config: Config):
         self.config = config
 
-    def request(self, payload: dict, cancelled: threading.Event, *, thinking: bool | None = None,
-                settings: Settings | None = None) -> Completion:
+    def _prepare(self, payload: dict, cancelled: threading.Event, thinking: bool | None,
+                 settings: Settings | None) -> tuple[Settings, urllib.request.Request]:
         settings = replace(settings or self.config.settings)
         if cancelled.is_set():
             raise ModelError("请求已取消。")
@@ -167,6 +167,80 @@ class ModelClient:
         request = urllib.request.Request(endpoint + route, json.dumps(payload, ensure_ascii=False).encode("utf-8"), headers)
         if cancelled.is_set():
             raise ModelError("请求已取消。")
+        return settings, request
+
+    def _http_error(self, error: urllib.error.HTTPError, settings: Settings) -> ModelError:
+        record_diagnostic(self.config, settings, status=error.code, reason="http_error")
+        messages = {401: "密钥无效或已过期，请检查模型设置。", 402: "模型服务余额不足。",
+                    403: "该账号没有访问此模型的权限。", 404: "未找到接口或模型，请检查服务地址、模型名和接口类型。",
+                    429: "模型服务限流或额度不足，请稍后重试。"}
+        return ModelError(messages.get(error.code, f"模型服务返回错误（HTTP {error.code}），请检查接口配置。"))
+
+    def stream(self, payload: dict, cancelled: threading.Event, on_text, *, thinking: bool | None = None,
+               settings: Settings | None = None) -> Completion:
+        """Chat-protocol server-sent events; on_text receives the accumulated final text so far."""
+        settings, request = self._prepare(dict(payload, stream=True), cancelled, thinking, settings)
+        if settings.protocol != "chat":
+            raise ModelError("流式输出仅支持 Chat Completions 接口。")
+        parts, size, finish, usage, model = [], 0, None, {}, settings.model
+        try:
+            with urllib.request.build_opener(NoRedirect).open(request, timeout=90) as response:
+                for raw in response:
+                    if cancelled.is_set():
+                        raise ModelError("请求已取消。")
+                    size += len(raw)
+                    if size > 2_000_000:
+                        raise ModelError("模型响应过大，请减少输入内容。")
+                    line = raw.decode("utf-8").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    chunk = json.loads(data)
+                    if not isinstance(chunk, dict) or chunk.get("error"):
+                        raise ModelResponseError("service_error")
+                    usage = chunk.get("usage") or usage
+                    model = chunk.get("model") or model
+                    choices = chunk.get("choices")
+                    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+                        continue
+                    finish = choices[0].get("finish_reason") or finish
+                    delta = choices[0].get("delta")
+                    if not isinstance(delta, dict):
+                        continue
+                    if delta.get("tool_calls") or delta.get("function_call"):
+                        raise ModelResponseError("tool_calls")
+                    # reasoning_content is deliberately neither persisted nor shown.
+                    if isinstance(delta.get("content"), str) and delta["content"]:
+                        parts.append(delta["content"])
+                        on_text("".join(parts))
+        except urllib.error.HTTPError as error:
+            raise self._http_error(error, settings) from None
+        except (urllib.error.URLError, TimeoutError, OSError):
+            raise ModelError("暂时连接不上模型服务，请检查网络和服务地址。") from None
+        except (ValueError, TypeError, UnicodeDecodeError):
+            raise ModelError("服务返回了无法解析的内容，请检查模型接口。") from None
+        if cancelled.is_set():
+            raise ModelError("请求已取消。")
+        summary = {"choices": [{"finish_reason": finish}]}
+        try:
+            text = "".join(parts).strip()
+            reason = {"length": "length", "content_filter": "content_filter",
+                      "insufficient_system_resource": "interrupted", "aborted": "interrupted"}.get(finish)
+            if reason:
+                raise ModelResponseError(reason)
+            if not text:
+                raise ModelResponseError("empty_final")
+        except ModelResponseError as error:
+            record_diagnostic(self.config, settings, status=200, data=summary, reason=error.reason)
+            raise
+        record_diagnostic(self.config, settings, status=200, data=summary, reason="completed")
+        return Completion(text, usage, model)
+
+    def request(self, payload: dict, cancelled: threading.Event, *, thinking: bool | None = None,
+                settings: Settings | None = None) -> Completion:
+        settings, request = self._prepare(payload, cancelled, thinking, settings)
         try:
             with urllib.request.build_opener(NoRedirect).open(request, timeout=90) as response:
                 raw = response.read(2_000_001)
@@ -174,11 +248,7 @@ class ModelClient:
                     raise ModelError("模型响应过大，请减少输入内容。")
                 data = json.loads(raw)
         except urllib.error.HTTPError as error:
-            record_diagnostic(self.config, settings, status=error.code, reason="http_error")
-            messages = {401: "密钥无效或已过期，请检查模型设置。", 402: "模型服务余额不足。",
-                        403: "该账号没有访问此模型的权限。", 404: "未找到接口或模型，请检查服务地址、模型名和接口类型。",
-                        429: "模型服务限流或额度不足，请稍后重试。"}
-            raise ModelError(messages.get(error.code, f"模型服务返回错误（HTTP {error.code}），请检查接口配置。")) from None
+            raise self._http_error(error, settings) from None
         except (urllib.error.URLError, TimeoutError, OSError):
             raise ModelError("暂时连接不上模型服务，请检查网络和服务地址。") from None
         except (ValueError, TypeError):

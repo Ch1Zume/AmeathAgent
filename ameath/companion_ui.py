@@ -108,12 +108,38 @@ class CompanionDialog(QDialog):
         memory_buttons.addWidget(self.delete_button)
         memory_layout.addLayout(memory_buttons)
         tabs.addTab(memory_tab, "长期记忆")
+
+        episode_tab = QWidget()
+        episode_layout = QVBoxLayout(episode_tab)
+        self.session_memory = QCheckBox("跨会话记住聊过的事和她自己讲的日常")
+        self.session_memory.setChecked(config.settings.session_memory)
+        self.session_memory.toggled.connect(self.save_preferences)
+        episode_layout.addWidget(self.session_memory)
+        episode_hint = QLabel("离开当前上下文的聊天会由模型整理成简短摘要，整理后删除原文。"
+                              "「往事」是真实聊过的内容，「日常」是角色原创的小故事；两者都不会写进长期记忆。")
+        episode_hint.setObjectName("muted")
+        episode_hint.setWordWrap(True)
+        episode_layout.addWidget(episode_hint)
+        self.episode_list = QListWidget()
+        self.episode_list.currentItemChanged.connect(lambda current, previous=None: self.delete_episode_button.setEnabled(current is not None))
+        episode_layout.addWidget(self.episode_list, 1)
+        episode_buttons = QHBoxLayout()
+        self.delete_episode_button = QPushButton("删除选中")
+        self.delete_episode_button.clicked.connect(self.delete_episode)
+        self.delete_episode_button.setEnabled(False)
+        episode_buttons.addWidget(self.delete_episode_button)
+        clear_button = QPushButton("全部清空")
+        clear_button.clicked.connect(self.clear_episodes)
+        episode_buttons.addWidget(clear_button)
+        episode_layout.addLayout(episode_buttons)
+        tabs.addTab(episode_tab, "往事与日常")
         self.tabs = tabs
         self.status = QLabel("人设与长期记忆保存在本机；聊天全文不会写入长期记忆。")
         self.status.setObjectName("muted")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.refresh_memories()
+        self.refresh_episodes()
 
     def populate_persona(self, persona: Persona):
         for name, field in self.persona_fields.items():
@@ -161,7 +187,11 @@ class CompanionDialog(QDialog):
     def save_preferences(self):
         self.config.settings.use_companion_context = self.use_context.isChecked()
         self.config.settings.memory_enabled = self.auto_memory.isChecked()
+        self.config.settings.session_memory = self.session_memory.isChecked()
         try:
+            if not self.config.settings.session_memory:
+                # Opting out discards raw turns that were still waiting to be summarized.
+                self.memory.clear_pending()
             self.config.save()
             self.status.setText("偏好已保存。关闭使用开关后，后续请求不会携带已保存的人设和长期记忆。")
             self.changed.emit()
@@ -205,6 +235,29 @@ class CompanionDialog(QDialog):
             self.changed.emit()
         except (ValueError, OSError, sqlite3.Error) as error:
             self.status.setText(str(error))
+
+    def refresh_episodes(self):
+        self.episode_list.clear()
+        for record in self.memory.episodes():
+            label = f"往事 · {record['created'][:10]}" if record["kind"] == "shared" else f"日常 · {record['topic']}"
+            item = QListWidgetItem(f"{label}\n{record['summary']}")
+            item.setData(Qt.ItemDataRole.UserRole, record["id"])
+            self.episode_list.addItem(item)
+        self.delete_episode_button.setEnabled(False)
+
+    def delete_episode(self):
+        item = self.episode_list.currentItem()
+        if item is not None:
+            self.memory.delete_episode(item.data(Qt.ItemDataRole.UserRole))
+            self.refresh_episodes()
+            self.status.setText("已删除，之后的聊天不再携带这条内容。")
+            self.changed.emit()
+
+    def clear_episodes(self):
+        self.memory.clear_episodes()
+        self.refresh_episodes()
+        self.status.setText("往事、日常和待整理的聊天都已清空。")
+        self.changed.emit()
 
     def delete_memory(self):
         if self.selected_id is not None:
