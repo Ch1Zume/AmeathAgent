@@ -9,6 +9,8 @@ from datetime import date, datetime
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from .screen_observation import capture_screen, observe
+
 # Only explicit requests; a false match merely keeps her quiet, which is the safe direction.
 QUIET_REQUEST = re.compile(r"安静(?:一?会儿?|一下|点|些)|让我(?:静静|静一静)|别(?:说话|吵|打扰|烦我)|不要(?:说话|打扰|吵)|闭嘴|少说(?:点|两句)|先别找我")
 QUIET_SECONDS = 2 * 3600
@@ -78,6 +80,7 @@ class CompanionPolicy:
 
 class CompanionSignals(QObject):
     ready = Signal(int, object)
+    failed = Signal(int, str)
 
 
 class ProactiveCompanion(QObject):
@@ -88,11 +91,16 @@ class ProactiveCompanion(QObject):
         self.config, self.pet, self.chat = config, pet, chat
         self.clock = clock
         self.wall = wall or (lambda: datetime.now().astimezone())
-        self.policy = CompanionPolicy(enabled=config.settings.proactive_enabled,
+        self.policy = CompanionPolicy(enabled=(config.settings.proactive_enabled or config.settings.screen_observation_enabled),
                                       daily_limit=config.settings.proactive_daily_limit,
                                       last_chat=clock(), last_interaction=clock())
         self.signals = CompanionSignals(self)
         self.signals.ready.connect(self.on_ready)
+        self.signals.failed.connect(self.on_failure)
+        self.last_screen_attempt = clock()
+        self.pending_kind = ""
+        self.capture_screen = capture_screen
+        self.observe_screen = observe
         self.cancelled = threading.Event()
         self.generation = 0
         self.pending = False
@@ -104,8 +112,8 @@ class ProactiveCompanion(QObject):
         self.timer.start()
 
     def set_enabled(self, enabled: bool):
-        self.policy.enabled = enabled
         self.config.settings.proactive_enabled = enabled
+        self.policy.enabled = enabled or self.config.settings.screen_observation_enabled
         self.config.save()
         if not enabled:
             self.invalidate()
@@ -117,7 +125,7 @@ class ProactiveCompanion(QObject):
     def on_interaction(self):
         now = self.clock()
         gap = self.policy.note_interaction(now)
-        if not self.pending and self.policy.return_due(gap, now, self.wall()):
+        if self.config.settings.proactive_enabled and not self.pending and self.policy.return_due(gap, now, self.wall()):
             self.begin("return", gap)
 
     def on_user_message(self, text: str):
@@ -125,18 +133,29 @@ class ProactiveCompanion(QObject):
         self.invalidate()
         self.policy.note_chat(text, self.clock())
 
-    def _busy(self) -> bool:
-        return (self.chat.busy or self.chat.isVisible() or self.pet.transition or self.pet.state == "sleeping"
+    def _busy(self, *, allow_sleep=False) -> bool:
+        return (self.chat.busy or self.chat.isVisible() or self.pet.transition or (self.pet.state == "sleeping" and not allow_sleep)
                 or self.blocked())
 
     def tick(self):
         if self.closing or self.pending:
             return
         now = self.clock()
-        if self.policy.share_due(now, self.wall()) and not self._busy():
+        if self._busy(allow_sleep=True) or self.config.settings.mode == "demo":
+            return
+        settings = self.config.settings
+        if (settings.screen_observation_enabled and settings.vision_model
+                and now - self.last_screen_attempt >= settings.screen_observation_interval * 60
+                and self.policy.allowed(now, self.wall())):
+            self.last_screen_attempt = now
+            image = self.capture_screen()
+            if image:
+                self.begin("screen", 0, image)
+            return
+        if settings.proactive_enabled and not self._busy() and self.policy.share_due(now, self.wall()):
             self.begin("share", now - self.policy.last_chat)
 
-    def begin(self, kind: str, gap: float):
+    def begin(self, kind: str, gap: float, image=None):
         agent = self.chat.agent
         if self.closing or self.config.settings.mode == "demo":
             return
@@ -147,13 +166,17 @@ class ProactiveCompanion(QObject):
         self.generation += 1
         generation = self.generation
         self.pending = True
+        self.pending_kind = kind
         history = list(self.chat.history)
 
         def run():
             try:
-                reply = agent.proactive(kind, gap, history, cancelled)
+                reply = (self.observe_screen(agent, self.config, image, cancelled) if kind == "screen"
+                         else agent.proactive(kind, gap, history, cancelled))
             except Exception:
-                reply = None
+                if not cancelled.is_set() and not self.closing:
+                    self.signals.failed.emit(generation, "服务连接失败或响应格式不正确" if kind == "screen" else "")
+                return
             if not cancelled.is_set() and not self.closing:
                 self.signals.ready.emit(generation, reply)
 
@@ -165,13 +188,28 @@ class ProactiveCompanion(QObject):
         self.pending = False
         now, wall = self.clock(), self.wall()
         # Re-check at delivery: quiet requests, typing or a new task may have started meanwhile.
-        if (reply is None or not self.policy.enabled or now < self.policy.quiet_until or quiet_hours(wall)
-                or self.chat.busy or self.chat.input.toPlainText().strip() or self.pet.transition or self.blocked()):
+        enabled = (self.config.settings.screen_observation_enabled if self.pending_kind == "screen"
+                   else self.config.settings.proactive_enabled)
+        if (reply is None or not enabled or now < self.policy.quiet_until or quiet_hours(wall)
+                or self.chat.busy or (self.pending_kind == "screen" and self.chat.isVisible()) or self.chat.input.toPlainText().strip()
+                or self.pet.transition or (self.pet.state == "sleeping" and self.pending_kind != "screen") or self.blocked()):
             return
         self.policy.spoke(now, wall.date())
         self.chat.show_proactive(reply.text)
         if not self.pet.is_moving:
             self.pet.respond(reply.text, reply.action, show_bubble=False)
+
+    def on_failure(self, generation, message):
+        if generation != self.generation or self.cancelled.is_set() or self.closing:
+            return
+        self.pending = False
+        if message and hasattr(self.pet, "setToolTip"):
+            self.pet.setToolTip("屏幕观察失败：" + message + "；请检查视觉模型设置。")
+
+    def settings_changed(self):
+        self.invalidate()
+        self.policy.enabled = (self.config.settings.proactive_enabled or self.config.settings.screen_observation_enabled)
+        self.last_screen_attempt = self.clock()
 
     def invalidate(self):
         self.cancelled.set()

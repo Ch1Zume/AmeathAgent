@@ -94,6 +94,8 @@ class AmeathWindow(QMainWindow):
         self.companion = ProactiveCompanion(config, self.pet, self.chat, self)
         self.companion.blocked = lambda: self.focus.clock.active or self.weather.busy or bool(self.weather.pending) or self.busy or self.game_panel.busy
         self.pet.proactive_enabled = config.settings.proactive_enabled
+        self.pet.screen_observation_enabled = config.settings.screen_observation_enabled
+        self.pet.screen_observation_stop_requested.connect(self.stop_screen_observation)
         self.pet.proactive_changed.connect(self.companion.set_enabled)
         self.pet.quiet_requested.connect(self.on_quiet_requested)
         self.pet.activated.connect(self.companion.on_interaction)
@@ -771,12 +773,22 @@ class AmeathWindow(QMainWindow):
         self.cancel_request()
         self.game_panel.stop()
         self.chat.cancel_request()
+        self.companion.invalidate()
         dialog = SettingsDialog(self.config, parent if isinstance(parent, QWidget) else self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.companion.settings_changed()
+            self.pet.screen_observation_enabled = self.config.settings.screen_observation_enabled
+            self.chat.speech.refresh_settings()
             self.cache.clear()
             self.clear_context()
             self.update_mode()
             self.chat.refresh_mode()
+
+    def stop_screen_observation(self):
+        self.config.settings.screen_observation_enabled = False
+        self.config.save()
+        self.pet.screen_observation_enabled = False
+        self.companion.settings_changed()
 
     def on_wandering_changed(self, enabled: bool):
         self.config.settings.pet_wandering = enabled

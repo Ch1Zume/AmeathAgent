@@ -6,15 +6,24 @@ speech for that reply stops.
 from __future__ import annotations
 
 import io
+import json
+import math
 import re
+import struct
 import sys
 import threading
+import urllib.error
+import urllib.request
 import wave
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
 from PySide6.QtCore import QObject, QTimer, Signal
+
+from .config import validate_endpoint
+from .llm import NoRedirect
+from .local_voice import LocalVoiceError, LocalVoiceService
 
 
 class TTSError(Exception):
@@ -40,7 +49,11 @@ def register_provider(name: str, factory: Callable):
     PROVIDERS[name] = factory
 
 
-def create_provider(config) -> SpeechProvider:
+def create_provider(config, local_voice=None) -> SpeechProvider:
+    if config.settings.tts_provider == "aemeath_local":
+        if local_voice is None:
+            raise TTSError("本地爱弥斯语音需要通过桌宠朗读队列启动。")
+        return AemeathLocalSpeechProvider(local_voice)
     factory = PROVIDERS.get(config.settings.tts_provider)
     if factory is None:
         raise TTSError(f"没有名为「{config.settings.tts_provider}」的语音接口。")
@@ -65,6 +78,120 @@ class CustomSpeechProvider:
 register_provider("custom", CustomSpeechProvider)
 
 
+class MiniMaxSpeechProvider:
+    """MiniMax synchronous T2A; return the WAV bytes required by the Windows player."""
+
+    def __init__(self, config):
+        self.endpoint = validate_endpoint(config.settings.tts_endpoint)
+        self.model = config.settings.tts_model.strip()
+        self.voice = config.settings.tts_voice.strip()
+        self.key = config.tts_key()
+
+    def synthesize(self, text: str, cancelled: threading.Event) -> SpeechAudio:
+        if cancelled.is_set():
+            raise TTSError("语音请求已取消。")
+        if not self.model or not self.voice or not self.key:
+            raise TTSError("请在模型设置中填写 MiniMax 语音模型、音色 ID 和语音 API 密钥。")
+        payload = {"model": self.model, "text": text, "stream": False, "output_format": "hex",
+                   "voice_setting": {"voice_id": self.voice, "speed": 1, "vol": 1, "pitch": 0},
+                   "audio_setting": {"sample_rate": 32000, "format": "wav", "channel": 1}}
+        request = urllib.request.Request(self.endpoint, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                                         headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.key}"},
+                                         method="POST")
+        try:
+            with urllib.request.build_opener(NoRedirect).open(request, timeout=60) as response:
+                raw = response.read(20_000_001)
+            if len(raw) > 20_000_000:
+                raise TTSError("语音服务返回的数据过大。")
+            data = json.loads(raw)
+            if not isinstance(data, dict) or not isinstance(data.get("base_resp"), dict):
+                raise ValueError("Invalid response")
+            status = data["base_resp"].get("status_code")
+            if status != 0:
+                raise TTSError(f"MiniMax 语音请求失败（状态码 {status if isinstance(status, int) else '未知'}），请检查语音设置及账户权限。")
+            audio = bytes.fromhex(data["data"]["audio"])
+            if not audio:
+                raise ValueError("Empty audio")
+            wav_seconds(audio)
+        except urllib.error.HTTPError as error:
+            raise TTSError(f"MiniMax 语音请求失败（HTTP {error.code}），请检查语音设置。") from None
+        except (urllib.error.URLError, TimeoutError, OSError):
+            raise TTSError("无法连接语音服务，请检查网络和服务地址。") from None
+        except (ValueError, TypeError, KeyError):
+            raise TTSError("语音服务返回的数据格式不正确。") from None
+        if cancelled.is_set():
+            raise TTSError("语音请求已取消。")
+        return SpeechAudio(audio)
+
+
+register_provider("minimax", MiniMaxSpeechProvider)
+
+
+class AemeathLocalSpeechProvider:
+    def __init__(self, service):
+        self.service = service
+
+    def synthesize(self, text: str, cancelled: threading.Event) -> SpeechAudio:
+        if cancelled.is_set():
+            raise TTSError("语音请求已取消。")
+        try:
+            address = self.service.address(cancelled)
+            if cancelled.is_set():
+                raise TTSError("语音请求已取消。")
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect)
+            phrases = [part.strip() for part in re.split(r"(?<=[。！？!?；;])\s*", text) if part.strip()]
+            params = None
+            clips = []
+            for phrase in phrases:
+                for attempt in range(2):
+                    if cancelled.is_set():
+                        raise TTSError("语音请求已取消。")
+                    request = urllib.request.Request(address, data=json.dumps({"text": phrase, "text_language": "zh"}, ensure_ascii=False).encode("utf-8"),
+                                                     headers={"Content-Type": "application/json"}, method="POST")
+                    with opener.open(request, timeout=120) as response:
+                        audio = response.read(20_000_001)
+                    if len(audio) > 20_000_000:
+                        raise TTSError("本地语音返回的数据过大。")
+                    duration = wav_seconds(audio)
+                    with wave.open(io.BytesIO(audio), "rb") as wav:
+                        current = (wav.getnchannels(), wav.getsampwidth(), wav.getframerate(), wav.getcomptype())
+                        frames = wav.readframes(wav.getnframes())
+                    if duration >= 5 and current[1] == 2 and current[3] == "NONE":
+                        count = len(frames) // 2
+                        rms = math.sqrt(sum(sample[0] ** 2 for sample in struct.iter_unpack('<h', frames)) / max(count, 1)) / 32768
+                        if rms < 0.002:
+                            if attempt == 0:
+                                continue
+                            raise TTSError("本地音色生成了异常静音，请稍后重试或切换 MiniMax 语音。")
+                    if params is None:
+                        params = current
+                    elif params != current:
+                        raise TTSError("本地音色返回了不一致的音频格式。")
+                    clips.append(frames)
+                    break
+            if params is None:
+                raise TTSError("没有可以朗读的文字。")
+            output = io.BytesIO()
+            with wave.open(output, "wb") as result:
+                result.setnchannels(params[0])
+                result.setsampwidth(params[1])
+                result.setframerate(params[2])
+                for frames in clips:
+                    result.writeframes(frames)
+            audio = output.getvalue()
+        except LocalVoiceError as error:
+            raise TTSError(str(error)) from None
+        except urllib.error.HTTPError as error:
+            if error.code == 422:
+                raise TTSError("本地语音多次生成不完整，已停止朗读；可以重试或切换其他音色。") from None
+            raise TTSError("本地语音合成失败，请查看 .local/aemeath-voice/service.log。") from None
+        except (urllib.error.URLError, TimeoutError, OSError):
+            raise TTSError("本地语音合成失败，请查看 .local/aemeath-voice/service.log。") from None
+        if cancelled.is_set():
+            raise TTSError("语音请求已取消。")
+        return SpeechAudio(audio)
+
+
 def speakable_text(segment: str, limit=500) -> str:
     """Markdown bubbles as plain spoken text; code and tables are referred to, not read out."""
     text = re.sub(r"```.*?(```|$)|~~~.*?(~~~|$)", "（代码在气泡里）", segment, flags=re.S)
@@ -75,6 +202,32 @@ def speakable_text(segment: str, limit=500) -> str:
     text = re.sub(r"^\s*(?:#{1,6}|>|[-*+]|\d+[.)])\s+", "", text, flags=re.M)
     text = re.sub(r"[*_`~]+", "", text)
     return re.sub(r"\s+", " ", text).strip()[:limit]
+
+
+def speech_phrases(text: str, max_chars: int = 45) -> tuple[str, ...]:
+    """Split a finished bubble into bounded, complete phrases for incremental playback."""
+    parts = re.split(r"(?<=[。！？!?；;])\s*", text)
+    result = []
+    for part in parts:
+        part = part.strip()
+        while len(part) > max_chars:
+            cut = max(part.rfind(mark, 0, max_chars + 1) for mark in ("，", ",", "、", "：", ":", " "))
+            cut = cut + 1 if cut >= max_chars // 3 else max_chars
+            result.append(part[:cut].strip())
+            part = part[cut:].strip()
+        if part:
+            result.append(part)
+    return tuple(part for part in result if part)
+
+
+def speech_units(segments) -> tuple[tuple[str, str], ...]:
+    """Pair displayed text with its spoken form without splitting Markdown markup."""
+    units = []
+    for segment in segments:
+        # Splitting across markup can break code blocks, links and emphasis.
+        parts = (segment,) if any(token in segment for token in ('`', '[', '*', '_', '|')) else speech_phrases(segment)
+        units.extend((part, speakable_text(part)) for part in parts)
+    return tuple(units)
 
 
 def wav_seconds(data: bytes) -> float:
@@ -128,12 +281,15 @@ class SpeechSignals(QObject):
 class SpeechQueue(QObject):
     """Speaks bubbles in order. `extend` with a longer tuple continues; anything else restarts."""
     failed = Signal(str)
+    started = Signal(int)
+    drained = Signal()
     GAP_MS = 150
 
-    def __init__(self, config, parent=None, *, provider_factory=create_provider, backend=None):
+    def __init__(self, config, parent=None, *, provider_factory=None, backend=None):
         super().__init__(parent)
         self.config = config
-        self.provider_factory = provider_factory
+        self.local_voice = LocalVoiceService(config.directory)
+        self.provider_factory = provider_factory or (lambda config: create_provider(config, self.local_voice))
         self.backend = backend if backend is not None else (WinsoundBackend(config.directory) if WinsoundBackend.available() else None)
         self.signals = SpeechSignals(self)
         self.signals.ready.connect(self._on_ready)
@@ -164,7 +320,7 @@ class SpeechQueue(QObject):
         if self.backend is None:
             self.failed.emit("这台电脑上没有可用的语音播放器，回复仍会以文字显示。")
             return
-        spoken = tuple(speakable_text(segment) for segment in segments)
+        spoken = tuple(spoken for _display, spoken in speech_units(segments))
         if spoken[:len(self._segments)] != self._segments:
             self.stop()
         if len(spoken) <= len(self._segments):
@@ -225,9 +381,11 @@ class SpeechQueue(QObject):
 
     def _play_next(self):
         while not self._playing and self._next in self._ready:
-            audio = self._ready.pop(self._next)
+            index = self._next
+            audio = self._ready.pop(index)
             self._next += 1
             if audio is None:
+                self.started.emit(index)
                 continue  # Nothing speakable in this bubble.
             try:
                 seconds = self.backend.play(audio)
@@ -236,7 +394,10 @@ class SpeechQueue(QObject):
                 self.stop()
                 return
             self._playing = True
+            self.started.emit(index)
             self._timer.start(round(seconds * 1000) + self.GAP_MS)
+        if not self.active:
+            self.drained.emit()
 
     def _clip_finished(self):
         self._playing = False
@@ -262,5 +423,11 @@ class SpeechQueue(QObject):
 
     def shutdown(self):
         self.stop()
+        self.local_voice.close()
         if self.backend is not None and hasattr(self.backend, "close"):
             self.backend.close()
+
+    def refresh_settings(self):
+        if not self.enabled or self.config.settings.tts_provider != "aemeath_local":
+            self.local_voice.close()
+            self.local_voice = LocalVoiceService(self.config.directory)

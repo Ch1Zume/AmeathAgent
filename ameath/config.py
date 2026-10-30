@@ -23,8 +23,10 @@ class Settings:
     thinking: bool = False
     stream_chat: bool = True
     tts_enabled: bool = False
-    tts_provider: str = "custom"
-    tts_voice: str = ""
+    tts_provider: str = "minimax"
+    tts_voice: str = "female-shaonv"
+    tts_endpoint: str = "https://api.minimaxi.com/v1/t2a_v2"
+    tts_model: str = "speech-2.8-turbo"
     reasoning_effort: str = "high"
     game_thinking: bool = True
     game_endpoint: str = "http://127.0.0.1:8080"
@@ -38,6 +40,10 @@ class Settings:
     session_memory: bool = True
     proactive_enabled: bool = False
     proactive_daily_limit: int = 3
+    screen_observation_enabled: bool = False
+    screen_observation_interval: int = 15
+    vision_endpoint: str = "https://api.openai.com/v1"
+    vision_model: str = ""
     use_companion_context: bool = True
     weather_enabled: bool = True
     weather_city: str = ""
@@ -101,8 +107,12 @@ class Config:
         self.directory.mkdir(parents=True, exist_ok=True)
         self.path = self.directory / "settings.json"
         self.key_path = self.directory / "credential.dpapi"
+        self.tts_key_path = self.directory / "tts-credential.dpapi"
+        self.vision_key_path = self.directory / "vision-credential.dpapi"
         self.settings = Settings()
         self._session_key = ""
+        self._session_tts_key = ""
+        self._session_vision_key = ""
         if self.path.exists():
             try:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
@@ -118,6 +128,10 @@ class Config:
                     raise ValueError("Invalid memory setting")
                 if not isinstance(self.settings.session_memory, bool) or not isinstance(self.settings.proactive_enabled, bool):
                     raise ValueError("Invalid companion setting")
+                if not isinstance(self.settings.screen_observation_enabled, bool) or not isinstance(self.settings.vision_model, str):
+                    raise ValueError("Invalid screen observation setting")
+                self.settings.screen_observation_interval = max(5, min(180, int(self.settings.screen_observation_interval)))
+                self.settings.vision_endpoint = validate_endpoint(self.settings.vision_endpoint)
                 self.settings.proactive_daily_limit = max(1, min(10, int(self.settings.proactive_daily_limit)))
                 self.settings.endpoint = validate_endpoint(self.settings.endpoint)
                 if self.settings.mode not in ("demo", "live") or self.settings.protocol not in ("responses", "chat"):
@@ -126,8 +140,10 @@ class Config:
                 self.settings.dwell_seconds = max(15, min(300, int(self.settings.dwell_seconds)))
                 if self.settings.reasoning_effort not in ("low", "high", "max"):
                     raise ValueError("Invalid reasoning effort")
-                if not isinstance(self.settings.tts_enabled, bool) or not isinstance(self.settings.tts_provider, str) or not isinstance(self.settings.tts_voice, str):
+                if (not isinstance(self.settings.tts_enabled, bool) or not isinstance(self.settings.tts_provider, str)
+                        or not isinstance(self.settings.tts_voice, str) or not isinstance(self.settings.tts_model, str)):
                     raise ValueError("Invalid speech setting")
+                self.settings.tts_endpoint = validate_endpoint(self.settings.tts_endpoint)
                 if not isinstance(self.settings.stream_chat, bool):
                     raise ValueError("Invalid streaming setting")
                 if not isinstance(self.settings.thinking, bool) or not isinstance(self.settings.game_thinking, bool):
@@ -155,6 +171,8 @@ class Config:
 
     def save(self):
         self.settings.endpoint = validate_endpoint(self.settings.endpoint)
+        self.settings.tts_endpoint = validate_endpoint(self.settings.tts_endpoint)
+        self.settings.vision_endpoint = validate_endpoint(self.settings.vision_endpoint)
         temporary = self.path.with_suffix(".tmp")
         temporary.write_text(json.dumps(asdict(self.settings), indent=2, ensure_ascii=False), encoding="utf-8")
         temporary.replace(self.path)
@@ -181,3 +199,41 @@ class Config:
             self.key_path.write_bytes(_protect(self._session_key.encode("utf-8")))
         elif self.key_path.exists():
             self.key_path.unlink()
+
+    def tts_key(self) -> str:
+        if self._session_tts_key:
+            return self._session_tts_key
+        if os.environ.get("AMEATH_TTS_API_KEY"):
+            return os.environ["AMEATH_TTS_API_KEY"]
+        if self.tts_key_path.exists():
+            try:
+                return _protect(self.tts_key_path.read_bytes(), decrypt=True).decode("utf-8")
+            except (OSError, UnicodeError):
+                return ""
+        return ""
+
+    def set_tts_key(self, key: str, remember: bool):
+        self._session_tts_key = key.strip()
+        if remember and self._session_tts_key:
+            self.tts_key_path.write_bytes(_protect(self._session_tts_key.encode("utf-8")))
+        elif self.tts_key_path.exists():
+            self.tts_key_path.unlink()
+
+    def vision_key(self) -> str:
+        if self._session_vision_key:
+            return self._session_vision_key
+        if os.environ.get("AMEATH_VISION_API_KEY"):
+            return os.environ["AMEATH_VISION_API_KEY"]
+        if self.vision_key_path.exists():
+            try:
+                return _protect(self.vision_key_path.read_bytes(), decrypt=True).decode("utf-8")
+            except (OSError, UnicodeError):
+                return ""
+        return ""
+
+    def set_vision_key(self, key: str, remember: bool):
+        self._session_vision_key = key.strip()
+        if remember and self._session_vision_key:
+            self.vision_key_path.write_bytes(_protect(self._session_vision_key.encode("utf-8")))
+        elif self.vision_key_path.exists():
+            self.vision_key_path.unlink()

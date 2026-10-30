@@ -73,6 +73,7 @@ class ReplyBubble(BubbleFrame):
         self.resize(370, 150)
         self.playing = False
         self.streaming = False
+        self.voice_sync = False
         self._sequence_mode = False
         self._segments = ()
         self._max_height = 440
@@ -114,6 +115,10 @@ class ReplyBubble(BubbleFrame):
         close.clicked.connect(self.dismiss)
         header.addWidget(close)
         layout.addWidget(self.header)
+        self.voice_waiting = QLabel("正在准备语音…")
+        self.voice_waiting.setContentsMargins(12, 8, 12, 8)
+        self.voice_waiting.hide()
+        layout.addWidget(self.voice_waiting)
         self.text = SafeTextBrowser()
         self.text.setOpenExternalLinks(False)
         self.text.setOpenLinks(False)
@@ -158,10 +163,11 @@ class ReplyBubble(BubbleFrame):
         self.geometry_changed.emit()
         self.update()
 
-    def set_sequence(self, segments, *, speaker="爱弥斯", animate=True, max_height=440, streaming=False):
+    def set_sequence(self, segments, *, speaker="爱弥斯", animate=True, max_height=440, streaming=False, voice_sync=False):
         self.stop_playback()
         # While streaming, playback waits after the last received bubble instead of finishing.
         self.streaming = streaming
+        self.voice_sync = bool(voice_sync and animate)
         self._sequence_mode = True
         self._segments = tuple(segments)
         self._max_height = max(130, max_height)
@@ -181,9 +187,10 @@ class ReplyBubble(BubbleFrame):
         self.scroll.show()
         self.playing = bool(animate and (self._segments or streaming))
         self.reveal_all.setVisible(self.playing)
-        if self.playing:
+        self.voice_waiting.setVisible(self.voice_sync and self.playing)
+        if self.playing and not self.voice_sync:
             self._show_next()
-        else:
+        elif not self.playing:
             for part in self._segments:
                 self._append_card(part, fade=False)
         self.update()
@@ -197,6 +204,8 @@ class ReplyBubble(BubbleFrame):
         self.text.setMarkdown("\n\n".join(segments))
         if final:
             self.streaming = False
+        if self.voice_sync and self.playing:
+            return True
         if not self.playing:
             for part in segments[len(self.speech_cards):]:
                 self._append_card(part, fade=False)
@@ -207,6 +216,18 @@ class ReplyBubble(BubbleFrame):
                 self.stop_playback()
                 self.playback_finished.emit()
         return True
+
+    def voice_started(self, index):
+        if not self.voice_sync or not self.playing:
+            return
+        self.voice_waiting.hide()
+        while len(self.speech_cards) <= index and len(self.speech_cards) < len(self._segments):
+            self._append_card(self._segments[len(self.speech_cards)], fade=False)
+
+    def voice_finished(self):
+        if self.voice_sync and self.playing and not self.streaming and len(self.speech_cards) >= len(self._segments):
+            self.stop_playback()
+            self.playback_finished.emit()
 
     def _append_card(self, part, *, fade):
         card = QFrame()
@@ -282,6 +303,8 @@ class ReplyBubble(BubbleFrame):
     def stop_playback(self):
         self.playing = False
         self.streaming = False
+        self.voice_sync = False
+        self.voice_waiting.hide()
         self._next_timer.stop()
         self._scroll_timer.stop()
         self._fade.stop()

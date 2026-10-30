@@ -15,7 +15,7 @@ from .pet import clamp_position
 from .bubbles import BubbleFrame, ReplyBubble
 from .companion_ui import CompanionDialog
 from .input import MessageInput
-from .tts import SpeechQueue
+from .tts import SpeechQueue, speech_units
 
 
 class ChatInput(MessageInput):
@@ -65,6 +65,10 @@ class ChatDialog(BubbleFrame):
         self.signals.partial.connect(self.on_partial)
         self.speech = SpeechQueue(config, self)
         self.speech.failed.connect(self.on_speech_failed)
+        self.speech.started.connect(self.reply_voice_started)
+        self.speech.drained.connect(self.reply_voice_finished)
+        self._voice_layout = self.speech.enabled
+        self._voice_sync = self.speech.enabled
         self.streamed = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(19, 13, 19, 25)
@@ -220,11 +224,11 @@ class ChatDialog(BubbleFrame):
         self._reset_auto_hide()
         self.reposition()
 
-    def show_speech(self, segments, *, animate=False, streaming=False):
+    def show_speech(self, segments, *, animate=False, streaming=False, voice_sync=False):
         screen = self.anchor.screen() if self.anchor is not None else QGuiApplication.primaryScreen()
         max_height = min(440, screen.availableGeometry().height() - 190) if screen else 440
         self.reply_bubble.set_sequence(segments, speaker=self.persona_name, animate=animate, max_height=max_height,
-                                       streaming=streaming)
+                                       streaming=streaming, voice_sync=voice_sync)
         self.reply_bubble.show()
         self._reset_auto_hide()
         self.reposition()
@@ -252,8 +256,15 @@ class ChatDialog(BubbleFrame):
         self.history = self.history[-12:]
         self.messages.append(("assistant", text))
         self.messages = self.messages[-40:]
-        self.refresh_transcript()
-        self.speech.extend(speech_segments(text))
+        segments = speech_segments(text)
+        self.speech.stop()
+        self._voice_layout = self.speech.enabled
+        self._voice_sync = self.speech.enabled
+        if self._voice_sync:
+            self.show_speech(self._voice_segments(segments), animate=True, voice_sync=True)
+        else:
+            self.refresh_transcript()
+        self.speech.extend(segments)
         self.reply_bubble.text.setToolTip(tooltip)
         self._reset_auto_hide()
 
@@ -305,6 +316,8 @@ class ChatDialog(BubbleFrame):
             return
         self.input.clear()
         self.speech.stop()
+        self._voice_layout = self.speech.enabled
+        self._voice_sync = self.speech.enabled
         self.message_sent.emit(text)
         self.reply_bubble.stop_playback()
         self.sent.setText("你：" + (text[:29] + "…" if len(text) > 29 else text))
@@ -353,10 +366,14 @@ class ChatDialog(BubbleFrame):
         self.send.setText("发送")
         self._message_index = len(self.messages) - 1
         # Continue a streamed reply in place; a retried or reformatted reply replays from the start.
-        if not (self.streamed and self.reply_bubble.extend_sequence(reply.segments, final=True)):
-            self.show_speech(reply.segments, animate=True)
+        display_segments = self._voice_segments(reply.segments)
+        if not (self.streamed and self.reply_bubble.extend_sequence(display_segments, final=True)):
+            self.show_speech(display_segments, animate=True, voice_sync=self._voice_sync)
         self.streamed = False
-        self.speech.extend(reply.segments)
+        if not self._voice_layout or self._voice_sync:
+            self.speech.extend(reply.segments)
+        if self._voice_sync and not self.speech.active:
+            self.reply_bubble.voice_finished()
         self.reply_bubble.previous.setEnabled(self._message_index > 0)
         self.reply_bubble.next.setEnabled(False)
         self.status.setText("本地演示 · 固定回复与动作" if reply.demo else f"已回复 · {self.config.settings.model}")
@@ -387,12 +404,26 @@ class ChatDialog(BubbleFrame):
     def on_partial(self, generation: int, bubbles):
         if generation != self.generation or not self.busy or self.cancelled.is_set() or self.closing:
             return
-        if not (self.streamed and self.reply_bubble.extend_sequence(bubbles)):
+        display_segments = self._voice_segments(bubbles)
+        if not (self.streamed and self.reply_bubble.extend_sequence(display_segments)):
             self.streamed = True
-            self.show_speech(bubbles, animate=True, streaming=True)
-        self.speech.extend(bubbles)
+            self.show_speech(display_segments, animate=True, streaming=True, voice_sync=self._voice_sync)
+        if not self._voice_layout or self._voice_sync:
+            self.speech.extend(bubbles)
+
+    def _voice_segments(self, segments):
+        return tuple(display for display, _spoken in speech_units(segments)) if self._voice_layout else segments
+
+    def reply_voice_started(self, index):
+        self.reply_bubble.voice_started(index)
+
+    def reply_voice_finished(self):
+        self.reply_bubble.voice_finished()
 
     def on_speech_failed(self, message: str):
+        self._voice_sync = False
+        if self.reply_bubble.voice_sync:
+            self.reply_bubble.finish_playback()
         self.status.setText(message)
         self.reply_bubble.text.setToolTip(message)
 
@@ -400,6 +431,8 @@ class ChatDialog(BubbleFrame):
         if generation == self.generation and self.busy and not self.cancelled.is_set() and not self.closing:
             self.streamed = False
             self.speech.stop()
+            self._voice_layout = self.speech.enabled
+            self._voice_sync = self.speech.enabled
             self.status.setText(message)
             self.show_text("这次回复没生成完整，我再试一下。")
 

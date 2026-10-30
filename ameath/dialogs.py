@@ -5,7 +5,7 @@ from dataclasses import replace
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget, QMessageBox,
-                               QPushButton, QTextBrowser, QVBoxLayout, QWidget)
+                               QPushButton, QScrollArea, QSpinBox, QTextBrowser, QVBoxLayout, QWidget)
 
 from .config import Config, Settings, validate_endpoint
 from .theme import MARKDOWN_STYLE, STYLE
@@ -59,13 +59,60 @@ class SettingsDialog(QDialog):
         self.stream_chat = QCheckBox("聊天回复边生成边显示（仅 Chat Completions 接口）")
         self.stream_chat.setChecked(config.settings.stream_chat)
         form.addRow("流式显示", self.stream_chat)
-        self.tts_enabled = QCheckBox("朗读回复（需先在 ameath/tts.py 接入语音接口）")
+        self.tts_enabled = QCheckBox("朗读回复")
         self.tts_enabled.setChecked(config.settings.tts_enabled)
         form.addRow("语音", self.tts_enabled)
+        self.tts_provider = QComboBox()
+        self.tts_provider.addItem("爱弥斯本地音色 · GPT-SoVITS", "aemeath_local")
+        self.tts_provider.addItem("MiniMax · 同步语音合成", "minimax")
+        self.tts_provider.addItem("自定义接口（代码扩展）", "custom")
+        if self.tts_provider.findData(config.settings.tts_provider) < 0:
+            self.tts_provider.addItem(config.settings.tts_provider, config.settings.tts_provider)
+        self.tts_provider.setCurrentIndex(self.tts_provider.findData(config.settings.tts_provider))
+        form.addRow("语音接口", self.tts_provider)
+        self.tts_endpoint = QLineEdit(config.settings.tts_endpoint)
+        self.tts_endpoint.setPlaceholderText("https://api.minimaxi.com/v1/t2a_v2")
+        form.addRow("语音地址", self.tts_endpoint)
+        self.tts_model = QLineEdit(config.settings.tts_model)
+        self.tts_model.setPlaceholderText("speech-2.8-turbo")
+        form.addRow("语音模型", self.tts_model)
+        self.tts_api_key = QLineEdit(config.tts_key())
+        self.tts_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.tts_api_key.setPlaceholderText("MiniMax API 密钥，与聊天模型密钥分开")
+        form.addRow("语音密钥", self.tts_api_key)
+        self.tts_remember = QCheckBox("在此 Windows 账户下加密保存语音密钥")
+        self.tts_remember.setChecked(config.tts_key_path.exists())
+        form.addRow("", self.tts_remember)
         self.tts_voice = QLineEdit(config.settings.tts_voice)
         self.tts_voice.setMaxLength(80)
-        self.tts_voice.setPlaceholderText("音色名称，由语音接口自行解释")
-        form.addRow("音色", self.tts_voice)
+        self.tts_voice.setPlaceholderText("MiniMax 音色 ID，例如 female-shaonv")
+        form.addRow("语音音色 ID", self.tts_voice)
+        self.tts_provider.currentIndexChanged.connect(self.update_speech_fields)
+        self.update_speech_fields()
+        self.screen_enabled = QCheckBox("定时读取屏幕并主动交流（默认关闭）")
+        self.screen_enabled.setChecked(config.settings.screen_observation_enabled)
+        form.addRow("屏幕观察", self.screen_enabled)
+        self.screen_interval = QSpinBox()
+        self.screen_interval.setRange(5, 180)
+        self.screen_interval.setSuffix(" 分钟")
+        self.screen_interval.setValue(config.settings.screen_observation_interval)
+        form.addRow("观察间隔", self.screen_interval)
+        self.vision_endpoint = QLineEdit(config.settings.vision_endpoint)
+        self.vision_endpoint.setPlaceholderText("兼容 Chat Completions 的视觉服务地址")
+        form.addRow("视觉服务地址", self.vision_endpoint)
+        self.vision_model = QLineEdit(config.settings.vision_model)
+        self.vision_model.setPlaceholderText("支持图片输入的模型名称")
+        form.addRow("视觉模型", self.vision_model)
+        self.vision_api_key = QLineEdit(config.vision_key())
+        self.vision_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.vision_api_key.setPlaceholderText("视觉服务密钥；本地服务可留空")
+        form.addRow("视觉密钥", self.vision_api_key)
+        self.vision_remember = QCheckBox("在此 Windows 账户下加密保存视觉密钥")
+        self.vision_remember.setChecked(config.vision_key_path.exists())
+        form.addRow("", self.vision_remember)
+        screen_info = QLabel("切换到连接模型模式并启用后，按间隔截取鼠标所在屏幕的完整画面并发送至视觉服务，可能包含聊天、账号等私密内容；截图不写入本地文件；夜间、静默和任务中暂停，并与主动交流共用每天上限和 45 分钟冷却。可能唤醒睡着的桌宠。")
+        screen_info.setWordWrap(True)
+        form.addRow("", screen_info)
         self.game_thinking = QCheckBox("游戏决策使用深度思考")
         self.game_thinking.setChecked(config.settings.game_thinking)
         form.addRow("游戏模式", self.game_thinking)
@@ -74,7 +121,13 @@ class SettingsDialog(QDialog):
             self.effort.addItem(label, value)
         self.effort.setCurrentIndex(self.effort.findData(config.settings.reasoning_effort))
         form.addRow("思考强度", self.effort)
-        layout.addLayout(form)
+        form_widget = QWidget()
+        form_widget.setLayout(form)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(form_widget)
+        scroll.setMinimumHeight(280)
+        layout.addWidget(scroll, 1)
         self.remember = QCheckBox("在此 Windows 账户下加密保存密钥")
         self.remember.setChecked(config.key_path.exists())
         layout.addWidget(self.remember)
@@ -90,6 +143,12 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+    def update_speech_fields(self):
+        is_minimax = self.tts_provider.currentData() == "minimax"
+        for widget in (self.tts_endpoint, self.tts_model, self.tts_api_key, self.tts_remember):
+            widget.setEnabled(is_minimax)
+        self.tts_voice.setEnabled(self.tts_provider.currentData() != "aemeath_local")
+
     def deepseek_preset(self):
         if "api.deepseek.com" not in self.endpoint.text():
             self.api_key.clear()
@@ -102,14 +161,29 @@ class SettingsDialog(QDialog):
     def save(self):
         try:
             endpoint = validate_endpoint(self.endpoint.text())
+            tts_endpoint = validate_endpoint(self.tts_endpoint.text())
+            vision_endpoint = validate_endpoint(self.vision_endpoint.text())
+            if self.screen_enabled.isChecked() and not self.vision_model.text().strip():
+                raise ValueError("启用屏幕观察前请填写支持图片输入的视觉模型。")
             if not self.model.text().strip():
                 raise ValueError("请填写模型名称。")
+            if self.tts_enabled.isChecked() and self.tts_provider.currentData() == "minimax":
+                if not self.tts_model.text().strip() or not self.tts_voice.text().strip() or not self.tts_api_key.text().strip():
+                    raise ValueError("请填写 MiniMax 语音模型、音色 ID 和语音 API 密钥。")
+            self.config.set_vision_key(self.vision_api_key.text(), self.vision_remember.isChecked())
             self.config.set_key(self.api_key.text(), self.remember.isChecked())
+            self.config.set_tts_key(self.tts_api_key.text(), self.tts_remember.isChecked())
             current = self.config.settings
             self.config.settings = replace(current, endpoint=endpoint, model=self.model.text().strip(),
                                             mode=self.mode.currentData(), protocol=self.protocol.currentData(),
-                                            thinking=self.thinking.isChecked(), stream_chat=self.stream_chat.isChecked(), tts_enabled=self.tts_enabled.isChecked(), tts_voice=self.tts_voice.text().strip(), game_thinking=self.game_thinking.isChecked(),
-                                            reasoning_effort=self.effort.currentData())
+                                            thinking=self.thinking.isChecked(), stream_chat=self.stream_chat.isChecked(),
+                                            tts_enabled=self.tts_enabled.isChecked(), tts_provider=self.tts_provider.currentData(),
+                                            tts_endpoint=tts_endpoint, tts_model=self.tts_model.text().strip(),
+                                            tts_voice=self.tts_voice.text().strip(), game_thinking=self.game_thinking.isChecked(),
+                                            reasoning_effort=self.effort.currentData(),
+                                            screen_observation_enabled=self.screen_enabled.isChecked(),
+                                            screen_observation_interval=self.screen_interval.value(),
+                                            vision_endpoint=vision_endpoint, vision_model=self.vision_model.text().strip())
             self.config.save()
         except (ValueError, OSError) as error:
             QMessageBox.warning(self, "设置未保存", str(error))

@@ -130,6 +130,7 @@ class DesktopPet(QWidget):
     resting_changed = Signal(bool)
     flying_changed = Signal(bool)
     proactive_changed = Signal(bool)
+    screen_observation_stop_requested = Signal()
     quiet_requested = Signal()
     animation_changed = Signal(str)
     position_changed = Signal()
@@ -176,6 +177,7 @@ class DesktopPet(QWidget):
         self.resting_enabled = bool(resting)
         self.flying_enabled = bool(flying)
         self.proactive_enabled = False
+        self.screen_observation_enabled = False
         self._now = time_provider or (lambda: datetime.now().astimezone())
         self.busy_provider = lambda: False
         self._idle_elapsed_ms = 0.0
@@ -657,6 +659,8 @@ class DesktopPet(QWidget):
         proactive.setCheckable(True)
         proactive.setChecked(self.proactive_enabled)
         proactive.toggled.connect(self.set_proactive)
+        if self.screen_observation_enabled:
+            menu.addAction("关闭屏幕观察", self.screen_observation_stop_requested.emit)
         menu.addAction("安静两小时", self.quiet_requested.emit)
         menu.addSeparator()
         for text, signal in [("玩杀戮尖塔 2", self.game_requested),
