@@ -81,8 +81,9 @@ def test_episode_context_keeps_recent_and_related_older_conversations(tmp_path):
 
 def test_parse_episodes_rejects_broken_output_and_bounds_items():
     shared, life = parse_episodes(json.dumps({"shared": ["a", "", 3, "b", "c", "d"],
-                                              "life": [{"topic": "t", "summary": "s"}, "bad"]}))
-    assert shared == ["a", "b", "c"] and life == [("t", "s")]
+                                              "life": [{"topic": "t", "summary": "s"}, "bad",
+                                                       {"topic": "u", "summary": "v", "status": "closed"}]}))
+    assert shared == ["a", "b", "c"] and life == [("t", "s", "open"), ("u", "v", "closed")]
     with pytest.raises(ModelError):
         parse_episodes('{"shared": [')
 
@@ -121,7 +122,7 @@ def test_failed_cancelled_or_demo_consolidation_keeps_pending_turns(tmp_path):
 def test_chat_payload_separates_real_episodes_from_character_stories(tmp_path):
     agent = live_agent(tmp_path)
     agent.memory.add_episodes(["用户在准备答辩。"], [("改曲子结尾", "最后一个音很神气。")])
-    agent.answer("最近怎么样", [], threading.Event())
+    agent.answer("你的曲子改完了吗", [], threading.Event())
     payload = json.dumps(agent.client.payloads[-1], ensure_ascii=False)
     assert "用户在准备答辩" in payload and "最后一个音很神气" in payload and "角色创作" in payload
     for setting in ("session_memory", "use_companion_context"):
@@ -214,3 +215,100 @@ def test_editor_lists_deletes_and_opting_out_discards_unsummarized_text(live_cha
     editor.clear_episodes()
     assert not memory.episodes()
     editor.close()
+
+
+@pytest.fixture
+def shanghai(monkeypatch):
+    monkeypatch.setenv("TZ", "Asia/Shanghai")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_old_databases_gain_thread_status_without_losing_rows(tmp_path):
+    import sqlite3
+    with sqlite3.connect(tmp_path / "companion.sqlite3") as db:
+        db.execute("CREATE TABLE episodes (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, topic TEXT NOT NULL, summary TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL)")
+        db.execute("INSERT INTO episodes (kind,topic,summary,created,updated) VALUES ('life','改曲子结尾','卡在最后一个音。','2026-10-27T00:00:00+00:00','2026-10-27T00:00:00+00:00')")
+    book = CompanionMemory(tmp_path)
+    thread = book.episodes("life")[0]
+    assert thread["status"] == "open" and thread["last_mentioned"] == ""
+    assert book.share_thread()["topic"] == "改曲子结尾"
+
+
+def test_unrelated_character_stories_stay_out_and_todays_topics_are_named(tmp_path):
+    book = CompanionMemory(tmp_path)
+    book.add_episodes([], [("改曲子结尾", "最后一个音太神气，舍不得改回去。")], mentioned="2026-10-01T00:00:00+00:00")
+    book.add_episodes([], [("挑战旧纪录", "差一步，最后那个岔路选错了。", "closed")], mentioned="2026-10-01T00:00:00+00:00")
+    context = book.episode_context("帮我看看这封邮件的最后一个段落")
+    assert context["life"] == [] and context["mentioned_today"] == []
+    context = book.episode_context("你那首曲子后来怎么样了")
+    assert [item["topic"] for item in context["life"]] == ["改曲子结尾"]
+    assert context["life"][0]["status"] == "进行中"
+    assert book.episode_context("旧纪录破了吗")["life"][0]["status"] == "告一段落"
+    assert book.note_mentions("今天先不改曲子了，那个结尾留到明天。") == 1
+    assert book.episode_context("")["mentioned_today"] == ["改曲子结尾"]
+
+
+def test_share_picks_the_longest_unmentioned_open_thread_and_skips_today(tmp_path):
+    book = CompanionMemory(tmp_path)
+    book.add_episodes([], [("改曲子结尾", "卡在最后一个音。")], mentioned="2026-10-20T00:00:00+00:00")
+    book.add_episodes([], [("折纸飞机", "翼角改了三次。")], mentioned="2026-10-10T00:00:00+00:00")
+    book.add_episodes([], [("整理卡带", "排好了。", "closed")], mentioned="2026-10-01T00:00:00+00:00")
+    assert book.share_thread()["topic"] == "折纸飞机"
+    book.mark_mentioned(book.share_thread()["id"])
+    assert book.share_thread()["topic"] == "改曲子结尾"
+    book.mark_mentioned(book.share_thread()["id"])
+    assert book.share_thread() is None
+
+
+def test_consolidation_records_mention_time_and_closed_threads(tmp_path, shanghai):
+    summary = json.dumps({"shared": [], "life": [{"topic": "改曲子结尾", "summary": "终于改好了。", "status": "closed"}]},
+                         ensure_ascii=False)
+    agent = live_agent(tmp_path, Client(summary))
+    agent.memory.log_turn("曲子呢", "改好啦")
+    agent.consolidate(threading.Event())
+    thread = agent.memory.episodes("life")[0]
+    assert thread["status"] == "closed" and thread["last_mentioned"]
+    assert agent.memory.share_thread() is None
+    assert agent.memory.episode_context("")["mentioned_today"] == ["改曲子结尾"]
+
+
+def test_dates_shown_to_the_model_use_the_local_clock(tmp_path, shanghai):
+    from ameath.chat import build_episode_payload
+    book = CompanionMemory(tmp_path)
+    book.add_episodes(["用户说起早上的组会。"], [], when="2026-10-01T23:30:00+00:00")
+    assert book.episode_context("")["shared"][0]["date"] == "2026-10-02"
+    payload = build_episode_payload([{"created": "2026-10-01T23:30:00+00:00", "user": "早", "assistant": "早呀"}],
+                                    [], Settings())
+    assert "2026-10-02 07:30" in json.dumps(payload, ensure_ascii=False)
+
+
+def test_shared_story_is_marked_only_when_the_line_is_delivered(tmp_path):
+    from ameath.chat import ChatReply
+    reply_text = '{"reply":["纸飞机的翼角我又改了一次。"],"emotion":"happy","memory_updates":[]}'
+
+    class Speaker(Client):
+        def request(self, payload, cancelled, **kwargs):
+            self.payloads.append(payload)
+            return Completion(reply_text, {}, "test")
+
+    agent = live_agent(tmp_path, Speaker())
+    agent.memory.add_episodes([], [("折纸飞机", "翼角改了三次。")], mentioned="2026-10-10T00:00:00+00:00")
+    agent.memory.add_episodes([], [("改曲子结尾", "卡在最后一个音。")], mentioned="2026-10-20T00:00:00+00:00")
+    reply = agent.proactive("share", 1800, [], threading.Event())
+    payload = json.dumps(agent.client.payloads[-1], ensure_ascii=False)
+    assert "翼角改了三次" in payload and "卡在最后一个音" not in payload
+    assert isinstance(reply, ChatReply) and reply.thread == agent.memory.share_thread()["id"]
+    assert agent.memory.episode_context("")["mentioned_today"] == []  # Not delivered yet.
+
+
+def test_delivered_replies_mark_the_stories_they_talk_about(live_chat):
+    from ameath.chat import ChatReply
+    memory = live_chat.agent.memory
+    memory.add_episodes([], [("改曲子结尾", "卡在最后一个音。")], mentioned="2026-10-01T00:00:00+00:00")
+    live_chat.on_reply(live_chat.generation + 1, "旧问题", ChatReply("曲子的结尾我改好啦。"))
+    assert memory.episode_context("")["mentioned_today"] == []
+    live_chat.show_proactive("早呀，曲子的结尾还差一点。")
+    assert memory.episode_context("")["mentioned_today"] == ["改曲子结尾"]

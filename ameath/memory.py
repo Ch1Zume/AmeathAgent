@@ -97,6 +97,13 @@ class CompanionMemory:
             # own invented stories. Neither is a user fact, so they live apart from memories.
             db.execute("CREATE TABLE IF NOT EXISTS episodes (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, topic TEXT NOT NULL, summary TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL)")
             db.execute("CREATE TABLE IF NOT EXISTS pending_turns (id INTEGER PRIMARY KEY, user TEXT NOT NULL, assistant TEXT NOT NULL, created TEXT NOT NULL)")
+            # Life threads can be finished or set aside, and remember when she last brought
+            # them up, so one unfinished story does not follow the user through the whole day.
+            columns = {row[1] for row in db.execute("PRAGMA table_info(episodes)")}
+            if "status" not in columns:
+                db.execute("ALTER TABLE episodes ADD COLUMN status TEXT NOT NULL DEFAULT 'open'")
+            if "last_mentioned" not in columns:
+                db.execute("ALTER TABLE episodes ADD COLUMN last_mentioned TEXT NOT NULL DEFAULT ''")
 
     @contextmanager
     def _connect(self):
@@ -173,27 +180,48 @@ class CompanionMemory:
                 rows = db.execute("SELECT * FROM episodes WHERE kind = ? ORDER BY updated DESC, id DESC", (kind,))
             return [dict(row) for row in rows]
 
-    def add_episodes(self, shared: list[str], life: list[tuple[str, str]], *, when: str | None = None):
+    def add_episodes(self, shared: list[str], life: list[tuple], *, when: str | None = None,
+                     mentioned: str | None = None):
+        """Life items are (topic, summary) or (topic, summary, status); listed topics count as mentioned."""
         now = datetime.now(timezone.utc).isoformat(timespec="microseconds")
         when = when or now
+        mentioned = mentioned or now
         with self._connect() as db:
             for summary in shared:
                 if valid_episode("对话", summary):
                     db.execute("INSERT INTO episodes (kind,topic,summary,created,updated) VALUES ('shared','对话',?,?,?)",
                                (summary.strip(), when, now))
-            for topic, summary in life:
+            for item in life:
+                topic, summary = item[0], item[1]
+                status = "closed" if len(item) > 2 and item[2] == "closed" else "open"
                 if not valid_episode(topic, summary):
                     continue
                 topic, summary = topic.strip(), summary.strip()
                 existing = db.execute("SELECT id FROM episodes WHERE kind = 'life' AND topic = ? COLLATE NOCASE", (topic,)).fetchone()
                 if existing:
-                    db.execute("UPDATE episodes SET summary = ?, updated = ? WHERE id = ?", (summary, now, existing["id"]))
+                    db.execute("UPDATE episodes SET summary = ?, status = ?, last_mentioned = ?, updated = ? WHERE id = ?",
+                               (summary, status, mentioned, now, existing["id"]))
                 else:
-                    db.execute("INSERT INTO episodes (kind,topic,summary,created,updated) VALUES ('life',?,?,?,?)",
-                               (topic, summary, when, now))
+                    db.execute("INSERT INTO episodes (kind,topic,summary,status,last_mentioned,created,updated) VALUES ('life',?,?,?,?,?,?)",
+                               (topic, summary, status, mentioned, when, now))
             for kind, limit in (("shared", MAX_SHARED_EPISODES), ("life", MAX_LIFE_THREADS)):
                 db.execute("DELETE FROM episodes WHERE kind = ? AND id NOT IN (SELECT id FROM episodes WHERE kind = ? ORDER BY updated DESC, id DESC LIMIT ?)",
                            (kind, kind, limit))
+
+    def note_mentions(self, text: str) -> int:
+        """Mark stories a delivered line talked about, so later turns know they came up today."""
+        terms = _tokens(text)
+        if not terms:
+            return 0
+        touched = [item["id"] for item in self.episodes("life") if _spoken_about(terms, item)]
+        for identifier in touched:
+            self.mark_mentioned(identifier)
+        return len(touched)
+
+    def mark_mentioned(self, identifier: int, when: str | None = None):
+        when = when or datetime.now(timezone.utc).isoformat(timespec="microseconds")
+        with self._connect() as db:
+            db.execute("UPDATE episodes SET last_mentioned = ? WHERE id = ? AND kind = 'life'", (when, identifier))
 
     def delete_episode(self, identifier: int):
         with self._connect() as db:
@@ -204,16 +232,85 @@ class CompanionMemory:
             db.execute("DELETE FROM episodes")
             db.execute("DELETE FROM pending_turns")
 
-    def episode_context(self, query: str, *, shared=6, life=4) -> dict:
-        """Recent conversations plus the ones that share words with this message."""
+    def episode_context(self, query: str, *, shared=6, life=2) -> dict:
+        """Recent conversations plus related ones; character stories only when this message touches them.
+
+        Unrelated stories stay out so she does not steer every topic back to them. Topics
+        already brought up today are named, so she leaves them alone unless the user asks.
+        """
         records = self.episodes("shared")
         terms = _tokens(query)
         chosen = records[:max(0, shared - 2)]
         related = sorted(records[len(chosen):], key=lambda item: len(terms & _tokens(item["summary"])), reverse=True)
         chosen += [item for item in related[:2] if terms & _tokens(item["summary"])]
         chosen.sort(key=lambda item: item["created"])
-        return {"shared": [{"date": item["created"][:10], "summary": item["summary"]} for item in chosen],
-                "life": [{"topic": item["topic"], "summary": item["summary"]} for item in self.episodes("life")[:life]]}
+        threads = self.episodes("life")
+        touched = [item for item in threads if _touches(terms, item)]
+        touched.sort(key=lambda item: _touch_score(terms, item), reverse=True)
+        today = datetime.now().astimezone().date()
+        return {"shared": [{"date": local_date(item["created"]), "summary": item["summary"]} for item in chosen],
+                "life": [_thread_view(item) for item in touched[:max(0, life)]],
+                "mentioned_today": [item["topic"] for item in threads
+                                    if _local_day(item.get("last_mentioned")) == today][:8]}
+
+    def share_thread(self) -> dict | None:
+        """The unfinished story she has gone longest without mentioning, skipping today's."""
+        today = datetime.now().astimezone().date()
+        candidates = [item for item in self.episodes("life")
+                      if item.get("status", "open") == "open" and _local_day(item.get("last_mentioned")) != today]
+        if not candidates:
+            return None
+        return min(candidates, key=lambda item: (item.get("last_mentioned") or "", item["id"]))
+
+
+def _local_day(stamp):
+    if not stamp:
+        return None
+    try:
+        moment = datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone().date()
+
+
+def local_date(stamp) -> str:
+    day = _local_day(stamp)
+    return day.isoformat() if day else str(stamp or "")[:10]
+
+
+def local_minute(stamp) -> str:
+    """Stored times are UTC; the model should see the user's own clock."""
+    try:
+        moment = datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return str(stamp or "")[:16]
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+def _thread_view(item: dict) -> dict:
+    return {"topic": item["topic"], "summary": item["summary"],
+            "status": "告一段落" if item.get("status") == "closed" else "进行中",
+            "last_progress": local_date(item["updated"])}
+
+
+def _touch_score(terms: set[str], item: dict) -> int:
+    return 3 * len(terms & _tokens(item["topic"])) + len(terms & _tokens(item["summary"]))
+
+
+def _touches(terms: set[str], item: dict) -> bool:
+    # Short topic names must overlap directly; a summary needs several shared words,
+    # since common runs like 最后一个 already make three pairs and match almost anything.
+    return bool(terms & _tokens(item["topic"])) or len(terms & _tokens(item["summary"])) >= 4
+
+
+def _spoken_about(terms: set[str], item: dict) -> bool:
+    # A whole reply has many words, so ask for more overlap than a user's short message.
+    topic = _tokens(item["topic"])
+    return (bool(topic) and len(terms & topic) >= min(2, len(topic))) or len(terms & _tokens(item["summary"])) >= 5
 
 
 def valid_episode(topic: str, summary: str) -> bool:

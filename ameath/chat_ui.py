@@ -252,6 +252,11 @@ class ChatDialog(BubbleFrame):
 
     def show_proactive(self, text, *, tooltip=""):
         self.refresh_mode()
+        if self.agent.keeps_episodes():
+            try:
+                self.agent.memory.note_mentions(text)
+            except (OSError, sqlite3.Error):
+                pass
         self.history.append(("assistant", text))
         self.history = self.history[-12:]
         self.messages.append(("assistant", text))
@@ -391,6 +396,7 @@ class ChatDialog(BubbleFrame):
             self.status.setText(self.status.text() + f" · 记住了 {saved} 条")
         if not reply.demo and self.agent.keeps_episodes():
             try:
+                self.agent.memory.note_mentions(reply.text)
                 self.agent.memory.log_turn(text, reply.text)
                 if len(self.agent.memory.pending_turns()) >= self.EPISODE_BATCH_ROUNDS:
                     self.consolidate_episodes(keep_recent=self.LIVE_ROUNDS)

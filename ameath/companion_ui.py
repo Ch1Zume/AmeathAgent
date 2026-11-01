@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QCheckBox, QDialog, QFileDialog, QFormLayout, QHB
                                QTabWidget, QTextEdit, QVBoxLayout, QWidget)
 
 from .config import Config
-from .memory import CompanionMemory, Persona, PersonaCard
+from .memory import CompanionMemory, Persona, PersonaCard, local_date
 from .theme import STYLE
 
 
@@ -239,7 +239,10 @@ class CompanionDialog(QDialog):
     def refresh_episodes(self):
         self.episode_list.clear()
         for record in self.memory.episodes():
-            label = f"往事 · {record['created'][:10]}" if record["kind"] == "shared" else f"日常 · {record['topic']}"
+            if record["kind"] == "shared":
+                label = f"往事 · {local_date(record['created'])}"
+            else:
+                label = f"日常 · {record['topic']}" + (" · 告一段落" if record.get("status") == "closed" else "")
             item = QListWidgetItem(f"{label}\n{record['summary']}")
             item.setData(Qt.ItemDataRole.UserRole, record["id"])
             self.episode_list.addItem(item)

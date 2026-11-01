@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field, replace
@@ -196,6 +197,11 @@ class ProactiveCompanion(QObject):
             return
         self.policy.spoke(now, wall.date())
         self.chat.show_proactive(reply.text)
+        if getattr(reply, "thread", None) and self.chat.agent.keeps_episodes():
+            try:
+                self.chat.agent.memory.mark_mentioned(reply.thread)
+            except (OSError, sqlite3.Error):
+                pass
         if not self.pet.is_moving:
             self.pet.respond(reply.text, reply.action, show_bubble=False)
 
