@@ -3,12 +3,14 @@ from __future__ import annotations
 import html
 import json
 import threading
+import time
 
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox,
                                QSplitter, QVBoxLayout, QWidget)
 
-from .game import DemoBridge, GameError, GameFinished, GameSession, GameWaiting, SpireBridge, choices_for, validate_game_endpoint
+from .game import (TASK_LABELS, DemoBridge, GameError, GameFinished, GameSession, GameWaiting, SpireBridge,
+                   choices_for, validate_game_endpoint)
 from .llm import ModelError
 from .widgets import SafeTextBrowser
 
@@ -18,9 +20,16 @@ class PilotSignals(QObject):
     finished = Signal(int)
 
 
+SPEECH_STATES = {"thoughtful": "review", "happy": "happy", "excited": "happy", "curious": "waiting",
+                 "sad": "waiting", "neutral": "idle"}
+SOURCE_LABELS = {"plan": "回合规划", "replan": "中途重算", "planned": "按计划", "step": "单步决策", "demo": "固定策略演示"}
+
+
 class GamePanel(QWidget):
     comment = Signal(str, str)
+    silenced = Signal()
     model_settings_requested = Signal()
+    VOICE_TIMEOUT = 60
 
     def __init__(self, config):
         super().__init__()
@@ -31,6 +40,11 @@ class GamePanel(QWidget):
         self.busy = False
         self.generation = 0
         self.stopping = False
+        # Returns "voice", "text" or "" (not shown); set by the app so game lines reuse chat bubbles and TTS.
+        self.voice_router = None
+        self._voice_done = threading.Event()
+        self._voice_done.set()
+        self._voice_text_only = True
         self.signals = PilotSignals(self)
         self.signals.update.connect(self.receive)
         self.signals.finished.connect(self.finished)
@@ -121,6 +135,7 @@ class GamePanel(QWidget):
         split.addWidget(self.decisions_view)
         layout.addWidget(split, 1)
         self.metrics = QLabel("尚未调用模型 · 游戏技能与论文阅读共用 Ameath 的模型设置")
+        self.metrics.setTextFormat(Qt.TextFormat.RichText)
         self.metrics.setObjectName("muted")
         self.metrics.setWordWrap(True)
         layout.addWidget(self.metrics)
@@ -159,7 +174,21 @@ class GamePanel(QWidget):
         self.decision = None
         self.apply_button.setEnabled(False)
         self.status.setText("已暂停，不会继续提交下一步；正在返回的请求或已提交动作可能仍会完成。")
+        self._voice_done.set()
+        self.silenced.emit()
         self.comment.emit("好，我先停下来，把操作交还给你。", "paused")
+
+    def voice_finished(self, *_):
+        self._voice_done.set()
+
+    def _wait_voice(self, session, lines):
+        """Worker side: she finishes speaking before the next action; slower play is accepted."""
+        deadline = time.monotonic() + self.VOICE_TIMEOUT
+        while not session.cancelled.is_set() and not self._voice_done.wait(0.2):
+            if time.monotonic() > deadline:
+                return
+        if self._voice_text_only and not session.cancelled.is_set():
+            session.cancelled.wait(min(6.0, 1.0 + 0.12 * sum(len(line) for line in lines)))
 
     def start(self, mode):
         if self.busy:
@@ -201,6 +230,13 @@ class GamePanel(QWidget):
         def emit(kind, data):
             self.signals.update.emit(generation, kind, data)
 
+        def speak(lines, emotion):
+            if not lines or session.cancelled.is_set():
+                return
+            self._voice_done.clear()
+            emit("speak", (tuple(lines), emotion))
+            self._wait_voice(session, lines)
+
         def run():
             try:
                 if mode == "read":
@@ -212,9 +248,13 @@ class GamePanel(QWidget):
                 snapshot = session.wait_next()
                 while not session.cancelled.is_set():
                     emit("snapshot", snapshot)
-                    emit("thinking", None)
+                    if snapshot.screen != "COMBAT" or session.turn_plan is None or session.demo:
+                        emit("thinking", None)
                     decision = session.propose(snapshot)
                     emit("proposed", decision)
+                    if decision.review is not None:
+                        speak(decision.review.speech, decision.review.emotion)
+                    speak(decision.speech, decision.emotion)
                     if mode == "suggest":
                         return
                     result = session.apply(decision)
@@ -247,6 +287,26 @@ class GamePanel(QWidget):
 
     def receive(self, generation, kind, data):
         if generation != self.generation or self.stopping:
+            if kind == "speak":
+                self._voice_done.set()
+            return
+        if kind == "speak":
+            lines, emotion = data
+            shown = ""
+            if self.voice_router is not None:
+                try:
+                    shown = self.voice_router(lines, emotion)
+                except Exception:
+                    shown = ""
+            if not shown:
+                self.comment.emit(" ".join(lines)[:120], SPEECH_STATES.get(emotion, "idle"))
+            self.decisions_view.append("<p>💬 " + html.escape(" ".join(lines)) + "</p>")
+            # Showing a voiced line restarts the speech queue, which may already have signalled; wait afresh.
+            self._voice_text_only = shown != "voice"
+            if shown == "voice":
+                self._voice_done.clear()
+            else:
+                self._voice_done.set()
             return
         if kind == "snapshot":
             snapshot = data
@@ -255,17 +315,32 @@ class GamePanel(QWidget):
             self.status.setText(f"{prefix} · {snapshot.screen} · {len(choices_for(snapshot))} 个当前支持的动作")
         elif kind == "proposed":
             self.decision = data
-            prefix = "固定策略演示" if data.demo else self.config.settings.model
-            self.decisions_view.append(f"<p><b>{html.escape(prefix)} · 建议</b><br>{html.escape(data.choice.label)}<br>{html.escape(data.reason)}</p>")
-            self.comment.emit("建议：" + (data.comment or data.reason)[:80], "waiting" if self._mode == "suggest" else "review")
+            if data.review is not None:
+                review = data.review
+                items = "；".join(review.priorities)
+                self.decisions_view.append(
+                    f"<p><b>阶段回顾 · {html.escape(review.reason)}</b><br>流派：{html.escape(review.archetype)}<br>"
+                    f"{html.escape(review.assessment)}" + (f"<br>优先：{html.escape(items)}" if items else "")
+                    + (f"<br>避免：{html.escape('；'.join(review.avoid))}" if review.avoid else "") + "</p>")
+            source = SOURCE_LABELS.get(data.source, "建议")
+            extra = ""
+            if data.math:
+                extra += "<br><span>算账：" + html.escape(data.math) + "</span>"
+            if data.lethal:
+                extra += "<br><b>本回合可斩杀</b>，不额外防御。"
+            self.decisions_view.append(f"<p><b>{html.escape(source)}</b> · {html.escape(data.choice.label)}<br>"
+                                       f"{html.escape(data.reason)}{extra}</p>")
+            if self._mode == "suggest" and not data.speech:
+                self.comment.emit("建议：" + (data.comment or data.reason)[:80], "waiting")
         elif kind == "thinking":
             self.comment.emit("我在看看这一手该怎么打。", "thinking")
         elif kind == "applied":
             decision, result = data
             self.decision = None
             label = "已完成" if result.get("status") == "completed" else "已提交，等待结果"
-            self.decisions_view.append(f"<p><b>{label}</b> · {html.escape(decision.choice.label)}<br>{html.escape(decision.comment)}</p>")
-            self.comment.emit(decision.comment or "这一手已提交，我再看看局面。", "happy")
+            self.decisions_view.append(f"<p><b>{label}</b> · {html.escape(decision.choice.label)}</p>")
+            if decision.comment and not decision.speech:
+                self.comment.emit(decision.comment, "happy")
         elif kind == "error":
             self.decision = None
             self.status.setText(str(data))
@@ -284,7 +359,13 @@ class GamePanel(QWidget):
         budget = self.session.budget
         qualifier = f"；另有 {budget.unknown_usage} 次用量未知" if budget.unknown_usage else ""
         source = "本地演示，不调用模型" if self.session.demo else self.config.settings.model
-        self.metrics.setText(f"{source} · 请求 {budget.requests}/{budget.request_limit} · 已报告 Token {budget.tokens:,}/{budget.token_limit:,}{qualifier}")
+        parts = [f"{TASK_LABELS.get(task, task)} {row['requests']} 次 / {row['tokens']:,}"
+                 for task, row in budget.by_task.items()]
+        breakdown = ("<br>" + " · ".join(parts)) if parts else ""
+        saved = f" · 按计划直接执行 {self.session.planned_steps} 步（未调用模型）" if self.session.planned_steps else ""
+        self.metrics.setText(f"{html.escape(source)} · 本次游玩 请求 {budget.requests}/{budget.request_limit} · 已报告 Token "
+                             f"{budget.tokens:,}/{budget.token_limit:,}{qualifier}{saved}{breakdown}"
+                             "<br>全部用途的日/周/月统计见左侧「用量记录」。")
 
     def finished(self, generation):
         if generation == self.generation:

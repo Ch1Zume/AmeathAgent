@@ -204,9 +204,18 @@ def speakable_text(segment: str, limit=500) -> str:
     return re.sub(r"\s+", " ", text).strip()[:limit]
 
 
-def speech_phrases(text: str, max_chars: int = 45) -> tuple[str, ...]:
-    """Split a finished bubble into bounded, complete phrases for incremental playback."""
+def speech_phrases(text: str, max_chars: int = 45, first_chars: int = 0) -> tuple[str, ...]:
+    """Split a finished bubble into bounded, complete phrases for incremental playback.
+
+    `first_chars` shortens only the opening phrase at a natural comma, so the first
+    audio is ready sooner; synthesis time grows with phrase length.
+    """
     parts = re.split(r"(?<=[。！？!?；;])\s*", text)
+    if first_chars and parts and len(parts[0].strip()) > first_chars:
+        head = parts[0].strip()
+        marks = [m for m in re.finditer(r"[，,、]|——|……|…", head[:first_chars + 2]) if m.end() >= 4]
+        if marks and len(head) - marks[-1].end() > 4:
+            parts[0:1] = [head[:marks[-1].end()], head[marks[-1].end():]]
     result = []
     for part in parts:
         part = part.strip()
@@ -220,12 +229,16 @@ def speech_phrases(text: str, max_chars: int = 45) -> tuple[str, ...]:
     return tuple(part for part in result if part)
 
 
+FIRST_PHRASE_CHARS = 16
+
+
 def speech_units(segments) -> tuple[tuple[str, str], ...]:
     """Pair displayed text with its spoken form without splitting Markdown markup."""
     units = []
     for segment in segments:
         # Splitting across markup can break code blocks, links and emphasis.
-        parts = (segment,) if any(token in segment for token in ('`', '[', '*', '_', '|')) else speech_phrases(segment)
+        first = FIRST_PHRASE_CHARS if not units else 0
+        parts = (segment,) if any(token in segment for token in ('`', '[', '*', '_', '|')) else speech_phrases(segment, first_chars=first)
         units.extend((part, speakable_text(part)) for part in parts)
     return tuple(units)
 
@@ -284,6 +297,8 @@ class SpeechQueue(QObject):
     started = Signal(int)
     drained = Signal()
     GAP_MS = 150
+    WORKERS = 2       # synthesize the next phrase while the current one is checked or played
+    CACHE_SIZE = 48   # short repeated lines (pauses, greetings, game remarks) skip synthesis
 
     def __init__(self, config, parent=None, *, provider_factory=None, backend=None):
         super().__init__(parent)
@@ -300,8 +315,10 @@ class SpeechQueue(QObject):
         self._ready: dict[int, SpeechAudio] = {}
         self._next = 0
         self._playing = False
-        self._working = False  # guarded by _lock, like _segments and _produced
+        self._working = 0  # running workers; guarded by _lock, like _segments and _produced
         self._produced = 0
+        self._cache: dict[tuple, SpeechAudio] = {}
+        self._warming = False
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._clip_finished)
@@ -327,12 +344,18 @@ class SpeechQueue(QObject):
             return
         with self._lock:
             self._segments = spoken
-            if self._working:
-                return  # The running worker picks up the new bubbles.
-            self._working = True
-        self._start_worker()
+            # Running workers pick up the new bubbles; add workers up to the limit.
+            wanted = min(self.WORKERS, len(spoken) - self._produced) - self._working
+            if wanted <= 0:
+                return
+            self._working += wanted
+        self._start_worker(wanted)
 
-    def _start_worker(self):
+    def _voice_key(self, text):
+        settings = self.config.settings
+        return (settings.tts_provider, settings.tts_voice, settings.tts_model, settings.tts_endpoint, text)
+
+    def _start_worker(self, count=1):
         try:
             provider = self.provider_factory(self.config)
         except TTSError as error:
@@ -347,27 +370,55 @@ class SpeechQueue(QObject):
                     if generation != self.generation:
                         return
                     if self._produced >= len(self._segments):
-                        self._working = False
+                        self._working -= 1
                         return
+                    # Claim an index; playback still follows index order in _play_next.
                     index = self._produced
+                    self._produced += 1
                     text = self._segments[index]
-                audio, error = None, ""
-                if text:
+                    key = self._voice_key(text)
+                    audio = self._cache.get(key)
+                error = ""
+                if text and audio is None:
                     try:
                         audio = provider.synthesize(text, cancelled)
                     except TTSError as exc:
                         error = str(exc)
                     except Exception:
                         error = "语音合成失败，回复仍会以文字显示。"
+                    if audio is not None and len(text) <= 40:
+                        with self._lock:
+                            self._cache[key] = audio
+                            while len(self._cache) > self.CACHE_SIZE:
+                                self._cache.pop(next(iter(self._cache)))
                 with self._lock:
                     if cancelled.is_set() or generation != self.generation:
                         return
-                    self._produced = index + 1
                 self.signals.ready.emit(generation, index, audio, error)
                 if error:
                     return
 
-        threading.Thread(target=run, daemon=True, name="ameath-tts").start()
+        for _ in range(count):
+            threading.Thread(target=run, daemon=True, name="ameath-tts").start()
+
+    def warm_up(self):
+        """Load the local voice model in the background so the first reply is not a cold start."""
+        if not self.enabled or self.config.settings.tts_provider != "aemeath_local" or self._warming:
+            return
+        self._warming = True
+        cancelled = self.cancelled
+
+        def run():
+            try:
+                provider = self.provider_factory(self.config)
+                if not cancelled.is_set():
+                    provider.synthesize("嗯，好。", cancelled)
+            except Exception:
+                pass  # A real reply reports problems; warming stays silent.
+            finally:
+                self._warming = False
+
+        threading.Thread(target=run, daemon=True, name="ameath-tts-warm").start()
 
     def _on_ready(self, generation, index, audio, error):
         if generation != self.generation or self.cancelled.is_set():
@@ -410,7 +461,7 @@ class SpeechQueue(QObject):
         with self._lock:
             self._segments = ()
             self._produced = 0
-            self._working = False
+            self._working = 0
         self._ready.clear()
         self._next = 0
         self._timer.stop()

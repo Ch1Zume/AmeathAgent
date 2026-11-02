@@ -79,7 +79,8 @@ def observe(agent, config, image, cancelled):
         {"type": "text", "text": prompt},
         {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(image).decode("ascii"), "detail": "high"}},
     ]
-    result = ModelClient(VisionConfig(config)).request(payload, cancelled, settings=settings, thinking=False)
+    result = ModelClient(VisionConfig(config)).request(payload, cancelled, settings=settings, thinking=False,
+                                                   category="companion", detail="screen")
     import json
     try:
         if json.loads(result.text).get("reply") == []:

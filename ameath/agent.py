@@ -89,7 +89,7 @@ def parse_response(data: dict, protocol: str) -> str:
 class Agent:
     def __init__(self, config: Config):
         self.config = config
-        self.client = ModelClient(config)
+        self.client = ModelClient(config, "agent")
 
     def answer(self, question: Question, cancelled: threading.Event) -> Answer:
         settings = replace(self.config.settings)
@@ -98,4 +98,4 @@ class Agent:
         if settings.mode == "demo":
             return demo_answer(question)
         payload = build_payload(question, settings)
-        return Answer(self.client.request(payload, cancelled, settings=settings).text, question.sources)
+        return Answer(self.client.request(payload, cancelled, settings=settings, detail="explain").text, question.sources)

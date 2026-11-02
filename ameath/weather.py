@@ -139,7 +139,7 @@ def greeting_period(now):
 class WeatherService:
     def __init__(self, config: Config):
         self.config = config
-        self.client = ModelClient(config)
+        self.client = ModelClient(config, "companion")
 
     def fetch(self, *, today=None, settings=None):
         settings = settings or self.config.settings
@@ -172,7 +172,7 @@ class WeatherService:
                         "max_completion_tokens": 650, "stream": False} if settings.protocol == "chat" else
                        {"model": settings.model, "instructions": system, "input": content, "max_output_tokens": 650, "store": False})
             try:
-                raw = self.client.request(payload, cancelled, thinking=False, settings=settings).text.strip()
+                raw = self.client.request(payload, cancelled, thinking=False, settings=settings, detail="weather").text.strip()
                 if raw.startswith("```"):
                     raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
                 data = json.loads(raw)

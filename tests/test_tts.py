@@ -444,3 +444,47 @@ def test_voice_sync_cancel_discards_late_audio_and_text(chat):
     QTest.qWait(150)
     assert not chat.speech.backend.played
     assert not chat.reply_bubble.voice_sync
+
+
+def test_first_phrase_is_short_so_audio_starts_sooner_without_losing_text():
+    from ameath.tts import speech_phrases, speech_units
+    text = "嗯……我打它越多对我越不利，得想想能不能靠效果伤害——哎呀，我玩的是战士啊！"
+    units = [spoken for _display, spoken in speech_units([text, "第二段，也很长很长很长很长很长很长的一句话。"])]
+    assert units[0] == "嗯……我打它越多对我越不利，" and "".join(units[:2]) == text
+    assert units[2] == "第二段，也很长很长很长很长很长很长的一句话。"  # only the opening phrase is shortened
+    assert speech_phrases("短句，后面。", first_chars=16) == ("短句，后面。",)
+
+
+def test_repeated_short_lines_reuse_audio_and_two_workers_keep_playback_order(app, config):
+    class SlowFirst(Provider):
+        def synthesize(self, text, cancelled):
+            if text == "慢的第一句。":
+                time.sleep(0.3)
+            return super().synthesize(text, cancelled)
+
+    provider, backend = SlowFirst(), Backend()
+    queue = queue_with(config, provider, backend)
+    queue.extend(["慢的第一句。", "快的第二句。"])
+    # The second phrase is synthesized while the first is still in progress...
+    assert wait_for(lambda: "快的第二句。" in provider.texts)
+    assert provider.texts == ["快的第二句。"]
+    # ...but playback still follows bubble order.
+    assert wait_for(lambda: len(backend.played) == 2 and not queue.active)
+    assert [provider.made[id(audio)] for audio in backend.played] == ["慢的第一句。", "快的第二句。"]
+    queue.stop()
+    queue.extend(["快的第二句。"])
+    assert wait_for(lambda: len(backend.played) == 3 and not queue.active)
+    assert provider.texts.count("快的第二句。") == 1
+    queue.shutdown()
+
+
+def test_game_lines_use_the_reply_bubble_but_never_enter_chat_history(chat):
+    assert chat.show_game_line(["我先算一下伤害。"]) == "voice"
+    assert wait_for(lambda: len(chat.speech.backend.played) == 1 and not chat.speech.active)
+    assert chat.history == [] and chat.messages == []
+    chat.busy = True
+    assert chat.show_game_line(["正在聊天时不抢话"]) == ""
+    chat.busy = False
+    chat.speech.extend(["聊天回复在说话。"])
+    assert chat.show_game_line(["游戏不打断聊天"]) == ""
+    chat.speech.stop()

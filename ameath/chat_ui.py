@@ -69,6 +69,7 @@ class ChatDialog(BubbleFrame):
         self.speech.drained.connect(self.reply_voice_finished)
         self._voice_layout = self.speech.enabled
         self._voice_sync = self.speech.enabled
+        self._game_speech_generation = -1
         self.streamed = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(19, 13, 19, 25)
@@ -272,6 +273,30 @@ class ChatDialog(BubbleFrame):
         self.speech.extend(segments)
         self.reply_bubble.text.setToolTip(tooltip)
         self._reset_auto_hide()
+
+    def show_game_line(self, segments) -> str:
+        """A game commentary line in the reply bubble, voiced when TTS is on.
+
+        Returns "voice", "text", or "" when chat is in use and the line was not shown.
+        Game lines stay out of chat history so play-by-play never becomes chat context.
+        """
+        segments = tuple(segment for segment in segments if segment.strip())
+        owns_voice = self.speech.generation == self._game_speech_generation
+        if not segments or self.closing or self.busy or self.input.composing or (self.speech.active and not owns_voice):
+            return ""
+        self.speech.stop()
+        self._game_speech_generation = self.speech.generation
+        voiced = self.speech.enabled and self.speech.backend is not None
+        self._voice_layout = self._voice_sync = voiced
+        self.show_speech(self._voice_segments(segments) if voiced else segments, animate=True, voice_sync=voiced)
+        self.speech.extend(segments)
+        self._reset_auto_hide()
+        return "voice" if voiced else "text"
+
+    def stop_game_voice(self):
+        if self.speech.generation == self._game_speech_generation:
+            self.speech.stop()
+            self.reply_bubble.stop_playback()
 
     def _reset_auto_hide(self):
         self._last_interaction = time.monotonic()

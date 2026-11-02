@@ -318,7 +318,7 @@ def demo_chat_reply(text: str, name="Ameath") -> ChatReply:
 class ChatAgent:
     def __init__(self, config: Config):
         self.config = config
-        self.client = ModelClient(config)
+        self.client = ModelClient(config, "chat")
         self.persona = PersonaCard(config.directory)
         if not self.persona.path.exists():
             self.persona.save(Persona())
@@ -340,7 +340,8 @@ class ChatAgent:
             if not batch or cancelled.is_set():
                 return 0
             payload = build_episode_payload(batch, self.memory.episodes("life"), settings, self.persona.load().name)
-            completion = self.client.request(payload, cancelled, settings=settings, thinking=False)
+            completion = self.client.request(payload, cancelled, settings=settings, thinking=False,
+                                             category="memory", detail="episodes")
             shared, life = parse_episodes(completion.text)
             if cancelled.is_set():
                 return 0
@@ -373,7 +374,8 @@ class ChatAgent:
                 episodes["life"] = [{"topic": thread["topic"], "summary": thread["summary"]}] if thread else []
         context = self.memory.relevant("") if settings.use_companion_context else []
         payload = build_chat_payload(text, history, settings, persona=persona, memories=context, episodes=episodes)
-        completion = self.client.request(payload, cancelled, settings=settings, thinking=False)
+        completion = self.client.request(payload, cancelled, settings=settings, thinking=False,
+                                         category="companion", detail=kind)
         try:
             if json.loads(completion.text).get("reply") == []:
                 return None
@@ -409,9 +411,9 @@ class ChatAgent:
                         shown[0] = len(bubbles)
                         on_partial(bubbles)
 
-                completion = self.client.stream(payload, cancelled, collect, settings=settings)
+                completion = self.client.stream(payload, cancelled, collect, settings=settings, detail="chat")
             else:
-                completion = self.client.request(payload, cancelled, settings=settings)
+                completion = self.client.request(payload, cancelled, settings=settings, detail="chat")
             return parse_chat_reply(completion.text)
         except (ModelResponseError, ChatFormatError) as error:
             if isinstance(error, ModelResponseError) and error.reason not in ("empty_final", "length"):
@@ -431,7 +433,7 @@ class ChatAgent:
             if cancelled.is_set():
                 raise ModelError("请求已取消。") from None
             try:
-                completion = self.client.request(fallback, cancelled, settings=settings, thinking=False)
+                completion = self.client.request(fallback, cancelled, settings=settings, thinking=False, detail="chat")
                 return replace(parse_chat_reply(completion.text), retried=True)
             except (ModelResponseError, ChatFormatError) as retry_error:
                 if isinstance(retry_error, ModelResponseError) and retry_error.reason not in ("empty_final", "length"):

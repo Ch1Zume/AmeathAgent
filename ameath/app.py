@@ -32,6 +32,7 @@ from .widgets import SafeTextBrowser
 from .fonts import configure_fonts
 from .instance import SingleInstance
 from .game_ui import GamePanel
+from .usage_ui import UsagePanel
 from .sprites import load_snowcap
 from .chat_ui import ChatDialog
 from .focus import Pomodoro, PomodoroDialog
@@ -197,6 +198,9 @@ class AmeathWindow(QMainWindow):
         self.game_nav = button("♧   杀戮尖塔 2", self.open_game, "nav")
         self.game_nav.setCheckable(True)
         side.addWidget(self.game_nav)
+        self.usage_nav = button("▤   用量记录", lambda: self.navigate(3), "nav")
+        self.usage_nav.setCheckable(True)
+        side.addWidget(self.usage_nav)
         side.addStretch(1)
         shortcuts = QLabel("随时叫我帮忙\n\n复制文字后  Ctrl + Alt + E\n框选屏幕      Ctrl + Alt + S")
         shortcuts.setObjectName("muted")
@@ -259,8 +263,16 @@ class AmeathWindow(QMainWindow):
         self.stack.addWidget(self.cards_view)
         self.game_panel = GamePanel(self.config)
         self.game_panel.comment.connect(self.pet.say)
+        self.game_panel.voice_router = self.speak_game_line
+        self.game_panel.silenced.connect(self.chat.stop_game_voice)
+        self.chat.speech.drained.connect(self.game_panel.voice_finished)
+        # Load the local voice model early so the first reply is not a cold start.
+        QTimer.singleShot(4000, self.chat.speech.warm_up)
+        self.chat.speech.failed.connect(self.game_panel.voice_finished)
         self.game_panel.model_settings_requested.connect(self.settings)
         self.stack.addWidget(self.game_panel)
+        self.usage_panel = UsagePanel(self.config)
+        self.stack.addWidget(self.usage_panel)
         work.addWidget(self.stack, 1)
         layout.addWidget(workspace, 1)
 
@@ -369,6 +381,16 @@ class AmeathWindow(QMainWindow):
         self.companion.quiet()
         self.pet.say("好，我安静两小时，有事点我就行。", "idle")
 
+    def speak_game_line(self, lines, emotion) -> str:
+        if self.exiting or self.focus.breaking:
+            return ""
+        shown = self.chat.show_game_line(lines)
+        if shown:
+            # Game lines never trigger flight or sleep.
+            action = {"happy": "waving", "excited": "jumping", "thoughtful": "review", "curious": "waiting"}.get(emotion, "idle")
+            self.pet.respond(" ".join(lines), action, show_bubble=False)
+        return shown
+
     def on_chat_reply(self, text, action):
         if not self.exiting and not self.focus.breaking:
             self.pet.respond(text, action, show_bubble=False)
@@ -423,9 +445,11 @@ class AmeathWindow(QMainWindow):
         self.read_nav.setChecked(index == 0)
         self.cards_nav.setChecked(index == 1)
         self.game_nav.setChecked(index == 2)
-        self.headline.setText("一起闯一闯尖塔。" if index == 2 else "让一个问题，慢慢变清楚。")
-        self.workspace_subtitle.setText("看一手牌，做一步决定。DeepSeek 驱动 Ameath。" if index == 2
-                                        else "选一段文字，理清一个概念。Ameath 就在旁边。")
+        self.usage_nav.setChecked(index == 3)
+        self.headline.setText({2: "一起闯一闯尖塔。", 3: "看看一起用掉了多少。"}.get(index, "让一个问题，慢慢变清楚。"))
+        self.workspace_subtitle.setText({2: "先算好这一回合，再一张张打出去。DeepSeek 驱动 Ameath。",
+                                         3: "对话、游戏和 Agent 工作共用同一份用量记录。"}.get(
+                                            index, "选一段文字，理清一个概念。Ameath 就在旁边。"))
         if index == 1:
             self.cards_view.refresh()
 
@@ -779,6 +803,7 @@ class AmeathWindow(QMainWindow):
             self.companion.settings_changed()
             self.pet.screen_observation_enabled = self.config.settings.screen_observation_enabled
             self.chat.speech.refresh_settings()
+            self.chat.speech.warm_up()
             self.cache.clear()
             self.clear_context()
             self.update_mode()

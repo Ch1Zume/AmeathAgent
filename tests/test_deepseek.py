@@ -41,12 +41,15 @@ def test_reading_and_games_use_the_same_core_and_final_json_only(tmp_path):
     config.settings.mode = "live"
 
     class Client:
-        def complete_json(self, system, material, cancelled):
+        def complete_json(self, system, material, cancelled, **kwargs):
             assert "json" in system.lower()
             assert "provided_choices" in material
             assert "reasoning_content" not in json.dumps(material)
-            identifier = material["provided_choices"][0]["choice_id"]
-            return Completion(json.dumps({"choice_id": identifier, "reason": "Test", "comment": "Next", "plan": "Build"}),
+            assert kwargs.get("detail") == "sts2:" + material["task"]
+            first = material["provided_choices"][0]
+            step = {"kind": first["kind"], "name": first["name"], "target": first["target"]}
+            return Completion(json.dumps({"steps": [step], "reason": "Test", "math": "6 ≥ 6", "lethal": True,
+                                          "speech": [], "emotion": "thoughtful", "combat_strategy": ""}),
                               {"total_tokens": 123}, config.settings.model)
 
     session = GameSession(config, DemoBridge(), client=Client())

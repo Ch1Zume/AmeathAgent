@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from .config import Config, Settings, validate_endpoint
+from .usage import UsageLedger
 
 
 class ModelError(Exception):
@@ -145,8 +146,17 @@ def extract_text(data: dict, protocol: str) -> str:
 
 
 class ModelClient:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, category: str = "other"):
         self.config = config
+        self.category = category
+
+    def _account(self, settings: Settings, usage, model, category, detail):
+        """Usage bookkeeping never fails or delays the request it describes."""
+        try:
+            UsageLedger(self.config.directory).record(category or self.category, detail, model or settings.model,
+                                                     usage if isinstance(usage, dict) else {})
+        except Exception:
+            pass
 
     def _prepare(self, payload: dict, cancelled: threading.Event, thinking: bool | None,
                  settings: Settings | None) -> tuple[Settings, urllib.request.Request]:
@@ -177,12 +187,13 @@ class ModelClient:
         return ModelError(messages.get(error.code, f"模型服务返回错误（HTTP {error.code}），请检查接口配置。"))
 
     def stream(self, payload: dict, cancelled: threading.Event, on_text, *, thinking: bool | None = None,
-               settings: Settings | None = None) -> Completion:
+               settings: Settings | None = None, category: str | None = None, detail: str = "") -> Completion:
         """Chat-protocol server-sent events; on_text receives the accumulated final text so far."""
         settings, request = self._prepare(dict(payload, stream=True), cancelled, thinking, settings)
         if settings.protocol != "chat":
             raise ModelError("流式输出仅支持 Chat Completions 接口。")
         parts, size, finish, usage, model = [], 0, None, {}, settings.model
+        received = False
         try:
             with urllib.request.build_opener(NoRedirect).open(request, timeout=90) as response:
                 for raw in response:
@@ -198,6 +209,7 @@ class ModelClient:
                     if data == "[DONE]":
                         break
                     chunk = json.loads(data)
+                    received = True
                     if not isinstance(chunk, dict) or chunk.get("error"):
                         raise ModelResponseError("service_error")
                     usage = chunk.get("usage") or usage
@@ -221,6 +233,9 @@ class ModelClient:
             raise ModelError("暂时连接不上模型服务，请检查网络和服务地址。") from None
         except (ValueError, TypeError, UnicodeDecodeError):
             raise ModelError("服务返回了无法解析的内容，请检查模型接口。") from None
+        finally:
+            if received:
+                self._account(settings, usage, model, category, detail)
         if cancelled.is_set():
             raise ModelError("请求已取消。")
         summary = {"choices": [{"finish_reason": finish}]}
@@ -239,7 +254,7 @@ class ModelClient:
         return Completion(text, usage, model)
 
     def request(self, payload: dict, cancelled: threading.Event, *, thinking: bool | None = None,
-                settings: Settings | None = None) -> Completion:
+                settings: Settings | None = None, category: str | None = None, detail: str = "") -> Completion:
         settings, request = self._prepare(payload, cancelled, thinking, settings)
         try:
             with urllib.request.build_opener(NoRedirect).open(request, timeout=90) as response:
@@ -257,6 +272,8 @@ class ModelClient:
             raise ModelError("请求已取消。")
         if not isinstance(data, dict):
             raise ModelError("模型响应格式不正确。")
+        # A response that arrived is billable even if its final text is unusable.
+        self._account(settings, data.get("usage"), data.get("model"), category, detail)
         # reasoning_content is deliberately neither persisted nor shown as commentary.
         try:
             final = extract_text(data, settings.protocol)
@@ -266,10 +283,12 @@ class ModelClient:
         record_diagnostic(self.config, settings, status=200, data=data, reason="completed")
         return Completion(final, data.get("usage") or {}, data.get("model") or settings.model)
 
-    def complete_json(self, system: str, material: dict, cancelled: threading.Event) -> Completion:
+    def complete_json(self, system: str, material: dict, cancelled: threading.Event, *,
+                      category: str = "game", detail: str = "", max_tokens: int = 8192) -> Completion:
         settings = replace(self.config.settings)
         settings.protocol = "chat"
         payload = {"model": settings.model, "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": json.dumps(material, ensure_ascii=False, separators=(",", ":"))}],
-                   "response_format": {"type": "json_object"}, "max_completion_tokens": 8192, "stream": False}
-        return self.request(payload, cancelled, thinking=settings.game_thinking, settings=settings)
+                   "response_format": {"type": "json_object"}, "max_completion_tokens": max_tokens, "stream": False}
+        return self.request(payload, cancelled, thinking=settings.game_thinking, settings=settings,
+                            category=category, detail=detail)
