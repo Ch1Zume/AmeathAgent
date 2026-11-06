@@ -115,7 +115,8 @@
 - 验收：在 Windows 上构建 exe 并完成桌宠、聊天、阅读、游戏、本地语音的基本检查；发布两个版本，从旧版在应用内升级到新版，确认 `.local` 保留、重启成功、失败时回到旧版本能启动。
 - 证据：`tests/test_updater.py`（6 项）；Linux 上 PyInstaller 6.22.3 按 spec 构建并以 offscreen 启动 12 秒、生成数据文件，打包脚本输出可被 `extract` 识别的结构。见验证记录。Windows exe、替换脚本和真实 Release 均未测试。
 - 2026-11-06：用户决定以 0.1.0 作为第一个发布版本（此前的 0.6.1 视为未发布的预发布原型），项目采用 AGPL-3.0；增加 `LICENSE`、`THIRD-PARTY-NOTICES.md`、`licenses/`（LGPL/GPL 文本），打包版附带这些文件与依赖的 dist-info。推送 `v0.1.0` 标签由 CI 构建发布。
-- 下一步：在 Windows 上实际下载 0.1.0 打包版做基本检查；发布下一个版本时验证应用内升级；没有代码签名。
+- 2026-11-06 发布：首次 `v0.1.0` 标签所在提交的 Windows CI 测试失败（runner 缺 `.tmp`、Windows 无 `time.tzset`），未生成 Release；修复后经用户同意删除并在 `6f9d4f6` 重建标签。GitHub Actions 在 Windows 上测试、构建、打包并发布 [v0.1.0](https://github.com/Ch1Zume/AmeathAgent/releases/tag/v0.1.0)（zip 约 79 MB + `.sha256`）。在 Linux 上用 `updater.check/download/extract` 对真实 Release 查询、下载、SHA256 校验并解压成功（版本相同，判定为非新版本）。
+- 下一步：在 Windows 上实际运行 0.1.0 打包版做基本检查；发布下一个版本时验证应用内升级与 `apply_update.cmd`；没有代码签名。
 
 ## 候选工作
 
