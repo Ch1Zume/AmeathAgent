@@ -33,6 +33,8 @@ from .fonts import configure_fonts
 from .instance import SingleInstance
 from .game_ui import GamePanel
 from .usage_ui import UsagePanel
+from .schedule_ui import SchedulePanel, ScheduleReminder, reminder_text
+from .updates_ui import UpdatesPanel
 from .sprites import load_snowcap
 from .chat_ui import ChatDialog
 from .focus import Pomodoro, PomodoroDialog
@@ -120,6 +122,7 @@ class AmeathWindow(QMainWindow):
         self.pet.lifecycle_finished.connect(self.on_lifecycle_finished)
         self.pet.focus_requested.connect(self.open_focus)
         self.pet.weather_requested.connect(self.open_weather)
+        self.pet.schedule_requested.connect(self.open_schedule)
         self.pet.game_requested.connect(lambda: self.open_game())
         self.pet.stop_game_requested.connect(lambda: self.game_panel.stop())
         self.setWindowTitle("AmeathAgent · 陪你一起读懂")
@@ -144,6 +147,7 @@ class AmeathWindow(QMainWindow):
             menu.addAction("打开 Ameath", self.open_app)
             menu.addAction("番茄钟", self.open_focus)
             menu.addAction("天气与问候", self.open_weather)
+            menu.addAction("日程表", self.open_schedule)
             menu.addAction("解释已复制的文字", self.from_clipboard)
             menu.addAction("框选屏幕内容", self.begin_capture)
             menu.addSeparator()
@@ -201,6 +205,12 @@ class AmeathWindow(QMainWindow):
         self.usage_nav = button("▤   用量记录", lambda: self.navigate(3), "nav")
         self.usage_nav.setCheckable(True)
         side.addWidget(self.usage_nav)
+        self.schedule_nav = button("▦   日程表", lambda: self.navigate(4), "nav")
+        self.schedule_nav.setCheckable(True)
+        side.addWidget(self.schedule_nav)
+        self.updates_nav = button("✦   版本与更新", lambda: self.navigate(5), "nav")
+        self.updates_nav.setCheckable(True)
+        side.addWidget(self.updates_nav)
         side.addStretch(1)
         shortcuts = QLabel("随时叫我帮忙\n\n复制文字后  Ctrl + Alt + E\n框选屏幕      Ctrl + Alt + S")
         shortcuts.setObjectName("muted")
@@ -273,6 +283,19 @@ class AmeathWindow(QMainWindow):
         self.stack.addWidget(self.game_panel)
         self.usage_panel = UsagePanel(self.config)
         self.stack.addWidget(self.usage_panel)
+        self.schedule_panel = SchedulePanel(self.chat.agent.schedule)
+        self.chat.schedule_changed.connect(self.schedule_panel.refresh)
+        self.stack.addWidget(self.schedule_panel)
+        self.updates_panel = UpdatesPanel(self.config)
+        self.updates_panel.update_available.connect(self.on_update_available)
+        self.updates_panel.restart_requested.connect(self.request_quit)
+        self.stack.addWidget(self.updates_panel)
+        self.reminder = ScheduleReminder(self.chat.agent.schedule, self)
+        self.reminder.due.connect(self.on_schedule_due)
+        self.reminder.start()
+        self._update_announced = ""
+        if self.config.settings.update_check:
+            QTimer.singleShot(20000, lambda: self.updates_panel.check_now(quiet=True))
         work.addWidget(self.stack, 1)
         layout.addWidget(workspace, 1)
 
@@ -391,6 +414,28 @@ class AmeathWindow(QMainWindow):
             self.pet.respond(" ".join(lines), action, show_bubble=False)
         return shown
 
+    def open_schedule(self):
+        self.navigate(4)
+        self.activate()
+
+    def on_schedule_due(self, event):
+        self.schedule_panel.refresh()
+        if self.exiting:
+            return
+        text = reminder_text(event)
+        # Spoken through the reply bubble when chat is idle; otherwise a pet bubble, never chat history.
+        if not self.chat.show_game_line((text,)):
+            self.pet.say(text, "waving")
+        if getattr(self, "tray", None) is not None:
+            self.tray.showMessage("Ameath 日程提醒", text, self.app_icon, 8000)
+
+    def on_update_available(self, info):
+        if info.version == self._update_announced or self.exiting:
+            return
+        self._update_announced = info.version
+        self.updates_nav.setText("✦   版本与更新 ·新")
+        self.pet.say(f"有新版本 {info.version} 啦，在「版本与更新」里可以更新。", "waving")
+
     def on_chat_reply(self, text, action):
         if not self.exiting and not self.focus.breaking:
             self.pet.respond(text, action, show_bubble=False)
@@ -446,12 +491,19 @@ class AmeathWindow(QMainWindow):
         self.cards_nav.setChecked(index == 1)
         self.game_nav.setChecked(index == 2)
         self.usage_nav.setChecked(index == 3)
-        self.headline.setText({2: "一起闯一闯尖塔。", 3: "看看一起用掉了多少。"}.get(index, "让一个问题，慢慢变清楚。"))
+        self.schedule_nav.setChecked(index == 4)
+        self.updates_nav.setChecked(index == 5)
+        self.headline.setText({2: "一起闯一闯尖塔。", 3: "看看一起用掉了多少。", 4: "把要做的事交给我记着。",
+                               5: "看看最近做了什么、接下来做什么。"}.get(index, "让一个问题，慢慢变清楚。"))
         self.workspace_subtitle.setText({2: "先算好这一回合，再一张张打出去。DeepSeek 驱动 Ameath。",
-                                         3: "对话、游戏和 Agent 工作共用同一份用量记录。"}.get(
+                                         3: "对话、游戏和 Agent 工作共用同一份用量记录。",
+                                         4: "到时间她会在桌面上提醒你，聊天里说一声也能记下。",
+                                         5: "更新计划、更新记录，以及应用内一键更新。"}.get(
                                             index, "选一段文字，理清一个概念。Ameath 就在旁边。"))
         if index == 1:
             self.cards_view.refresh()
+        elif index == 4:
+            self.schedule_panel.refresh()
 
     def open_game(self):
         self.navigate(2)
@@ -845,6 +897,8 @@ class AmeathWindow(QMainWindow):
         self.closing = True
         self.cancelled.set()
         self.observation_timer.stop()
+        self.reminder.stop()
+        self.updates_panel.cancel()
         self.weather.shutdown()
         self.companion.shutdown()
         self.focus.shutdown()

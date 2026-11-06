@@ -1,0 +1,58 @@
+# Builds the Windows app. A pushed tag vX.Y.Z publishes a GitHub Release that the in-app
+# updater reads; a manual run only uploads the zip as a workflow artifact.
+name: windows-build
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -r requirements-dev.txt "pyinstaller>=6.10,<7"
+      - name: Check the tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $version = python -c "import ameath; print(ameath.__version__)"
+          if ("v$version" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} does not match version $version" }
+      - name: Tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q --basetemp .tmp/pytest-ci --deselect tests/test_pet.py::test_right_click_commands_expose_sitting_sleeping_waking_and_flight
+      - name: Build
+        run: python -m PyInstaller packaging/AmeathAgent.spec --noconfirm --clean --distpath dist --workpath .tmp/pyinstaller
+      - name: Package
+        run: python tools/package_release.py dist/AmeathAgent --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AmeathAgent-win64
+          path: |
+            dist/AmeathAgent-*-win64.zip
+            dist/AmeathAgent-*-win64.zip.sha256
+      - name: Release notes from CHANGELOG
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $text = Get-Content CHANGELOG.md -Raw -Encoding utf8
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          $match = [regex]::Match($text, "(?ms)^## $([regex]::Escape($version))\b.*?(?=^## |\z)")
+          $body = if ($match.Success) { $match.Value } else { "See CHANGELOG.md" }
+          Set-Content -Path release-notes.md -Value $body -Encoding utf8
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          body_path: release-notes.md
+          files: |
+            dist/AmeathAgent-*-win64.zip
+            dist/AmeathAgent-*-win64.zip.sha256

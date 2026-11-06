@@ -40,6 +40,7 @@ class ChatDialog(BubbleFrame):
     activity = Signal(str, str)
     responded = Signal(str, str)
     message_sent = Signal(str)
+    schedule_changed = Signal()
 
     def __init__(self, config: Config, sheet=None):
         super().__init__()
@@ -419,6 +420,17 @@ class ChatDialog(BubbleFrame):
                     self.status.setText("已回复；部分记忆未能保存，可到「记忆与人设」整理。")
         if saved:
             self.status.setText(self.status.text() + f" · 记住了 {saved} 条")
+        scheduled = 0
+        for item in reply.schedules:
+            try:
+                self.agent.schedule.add(item["title"], item["start"], remind_minutes=item["remind_minutes"],
+                                        repeat=item["repeat"], note=item["note"], source="chat")
+                scheduled += 1
+            except (ValueError, OSError, sqlite3.Error):
+                pass
+        if scheduled:
+            self.status.setText(self.status.text() + f" · 加入日程 {scheduled} 条")
+            self.schedule_changed.emit()
         if not reply.demo and self.agent.keeps_episodes():
             try:
                 self.agent.memory.note_mentions(reply.text)

@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushB
                                QSplitter, QVBoxLayout, QWidget)
 
 from .game import (TASK_LABELS, DemoBridge, GameError, GameFinished, GameSession, GameWaiting, SpireBridge,
-                   choices_for, validate_game_endpoint)
+                   choices_for, load_postmortems, validate_game_endpoint)
 from .llm import ModelError
 from .widgets import SafeTextBrowser
 
@@ -22,7 +22,8 @@ class PilotSignals(QObject):
 
 SPEECH_STATES = {"thoughtful": "review", "happy": "happy", "excited": "happy", "curious": "waiting",
                  "sad": "waiting", "neutral": "idle"}
-SOURCE_LABELS = {"plan": "回合规划", "replan": "中途重算", "planned": "按计划", "step": "单步决策", "demo": "固定策略演示"}
+SOURCE_LABELS = {"plan": "回合规划", "replan": "中途重算", "planned": "按计划", "step": "单步决策", "demo": "固定策略演示",
+                 "route": "路线规划", "routed": "按路线"}
 
 
 class GamePanel(QWidget):
@@ -116,12 +117,19 @@ class GamePanel(QWidget):
         self.reset_button = QPushButton("新游玩会话")
         self.reset_button.clicked.connect(self.reset)
         budgets.addWidget(self.reset_button)
+        self.history_button = QPushButton("历次复盘")
+        self.history_button.clicked.connect(self.show_postmortems)
+        budgets.addWidget(self.history_button)
         budgets.addStretch(1)
         layout.addLayout(budgets)
         self.status = QLabel("先体验演示局面；切换真实游戏后，读取局面会检查模组状态。")
         self.status.setObjectName("status")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self.build_label = QLabel("本局流派：尚未回顾 · 路线：尚未规划")
+        self.build_label.setObjectName("muted")
+        self.build_label.setWordWrap(True)
+        layout.addWidget(self.build_label)
         split = QSplitter(Qt.Orientation.Horizontal)
         self.state_view = SafeTextBrowser()
         self.state_view.setOpenLinks(False)
@@ -165,6 +173,7 @@ class GamePanel(QWidget):
         self.apply_button.setEnabled(False)
         self.set_controls(True)
         self.metrics.setText("新会话 · 调用计数已重置")
+        self.update_build()
         self.status.setText("新会话准备好了，开始前请确认局面。")
 
     def stop(self):
@@ -240,7 +249,10 @@ class GamePanel(QWidget):
         def run():
             try:
                 if mode == "read":
-                    emit("snapshot", session.bridge.snapshot())
+                    snapshot = session.bridge.snapshot()
+                    emit("snapshot", snapshot)
+                    if snapshot.screen == "GAME_OVER" and not session.postmortem_done and session.run_log:
+                        session._check(snapshot)  # raises GameFinished, which runs the post-game review
                     return
                 if mode == "apply":
                     emit("applied", (decision_to_apply, session.apply(decision_to_apply)))
@@ -248,7 +260,8 @@ class GamePanel(QWidget):
                 snapshot = session.wait_next()
                 while not session.cancelled.is_set():
                     emit("snapshot", snapshot)
-                    if snapshot.screen != "COMBAT" or session.turn_plan is None or session.demo:
+                    # She only thinks aloud when a combat turn is being planned.
+                    if snapshot.screen == "COMBAT" and session.turn_plan is None and not session.demo:
                         emit("thinking", None)
                     decision = session.propose(snapshot)
                     emit("proposed", decision)
@@ -265,8 +278,17 @@ class GamePanel(QWidget):
                     snapshot = session.wait_next(decision.snapshot)
             except (GameError, ModelError) as error:
                 if isinstance(error, GameFinished):
-                    emit("snapshot", session.bridge.snapshot())
+                    final = session.bridge.snapshot()
+                    emit("snapshot", final)
                     emit("completed", str(error))
+                    try:
+                        review = session.postmortem(final)
+                    except (GameError, ModelError) as failure:
+                        emit("postmortem_failed", str(failure))
+                    else:
+                        if review is not None:
+                            emit("postmortem", review)
+                            speak(review.speech, review.emotion)
                 else:
                     emit("error", str(error))
             except Exception:
@@ -324,6 +346,10 @@ class GamePanel(QWidget):
                     + (f"<br>避免：{html.escape('；'.join(review.avoid))}" if review.avoid else "") + "</p>")
             source = SOURCE_LABELS.get(data.source, "建议")
             extra = ""
+            if data.build_fit:
+                extra += "<br><span>构筑：" + html.escape(data.build_fit) + "</span>"
+            if data.route:
+                extra += "<br><span>路线：" + html.escape(data.route["sequence"]) + "</span>"
             if data.math:
                 extra += "<br><span>算账：" + html.escape(data.math) + "</span>"
             if data.lethal:
@@ -350,10 +376,42 @@ class GamePanel(QWidget):
             self.decision = None
             self.status.setText(str(data))
             self.decisions_view.append("<p><b>本局结束</b><br>" + html.escape(str(data)) + "</p>")
-            self.comment.emit("这一局结束了，我们可以回顾一下。", "happy")
+            if self.session and not self.session.demo and self.session.run_log:
+                self.decisions_view.append("<p>正在复盘这一局…</p>")
+            else:
+                self.comment.emit("这一局结束了，我们可以回顾一下。", "happy")
+        elif kind == "postmortem":
+            self.decisions_view.append(render_postmortem(data.to_dict()))
+            if not data.speech:
+                self.comment.emit("复盘写好了，下一局我会注意这些。", "review")
+        elif kind == "postmortem_failed":
+            self.decisions_view.append("<p><b>复盘未完成</b><br>" + html.escape(str(data)) + "</p>")
         self.update_metrics()
 
+    def show_postmortems(self):
+        rows = load_postmortems(self.config.directory)
+        if not rows:
+            self.decisions_view.setMarkdown("### 历次复盘\n\n还没有复盘记录。自主游玩到一局结束时，她会自动复盘并把经验带到下一局。")
+            return
+        self.decisions_view.setHtml("<h3>历次复盘</h3>" + "".join(render_postmortem(row) for row in reversed(rows)))
+
+    def update_build(self):
+        session = self.session
+        if session is None:
+            self.build_label.setText("本局流派：尚未回顾 · 路线：尚未规划")
+            return
+        strategy = session.strategy or {}
+        parts = ["本局流派：" + (strategy.get("archetype") or "尚未回顾")]
+        if strategy.get("core_cards"):
+            parts.append("核心：" + "、".join(strategy["core_cards"][:4]))
+        if strategy.get("priorities"):
+            parts.append("优先：" + "；".join(strategy["priorities"][:3]))
+        route = session.route
+        parts.append("路线：" + (route["sequence"] if route else "尚未规划"))
+        self.build_label.setText(" · ".join(parts))
+
     def update_metrics(self):
+        self.update_build()
         if not self.session:
             return
         budget = self.session.budget
@@ -376,6 +434,18 @@ class GamePanel(QWidget):
     def shutdown(self):
         self.stop()
         self.generation += 1
+
+
+def render_postmortem(row: dict) -> str:
+    def items(key):
+        values = [html.escape(str(v)) for v in row.get(key) or []]
+        return "<ul>" + "".join(f"<li>{v}</li>" for v in values) + "</ul>" if values else ""
+    head = html.escape(str(row.get("result") or "本局结束"))
+    meta = " · ".join(html.escape(str(row[k])) for k in ("created", "archetype") if row.get(k))
+    return (f"<p><b>赛后复盘 · {head}</b>" + (f"<br><span>{meta}</span>" if meta else "")
+            + (f"<br>{html.escape(str(row.get('summary') or ''))}" if row.get("summary") else "") + "</p>"
+            + ("<p>关键决策：</p>" + items("key_moments") if row.get("key_moments") else "")
+            + ("<p>下一局的经验：</p>" + items("lessons") if row.get("lessons") else ""))
 
 
 def render_state(snapshot):

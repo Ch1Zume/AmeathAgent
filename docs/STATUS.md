@@ -1,6 +1,6 @@
 # 当前开发状态
 
-更新日期：2026-11-02（北京时间）。当前代码版本：0.6.1 原型；首次 GitHub 同步基线，尚未创建发布标签。这里只记录已找到的实现与验证边界，不把路线图当成功能清单。
+更新日期：2026-11-06（北京时间）。当前代码版本：0.6.1 原型；尚未创建发布标签，也还没有发布过打包版。这里只记录已找到的实现与验证边界，不把路线图当成功能清单。
 
 ## 能力现状
 
@@ -13,10 +13,12 @@
 | 用户长期记忆 | SQLite 保存可编辑事实/偏好；有开关、相关性选择与敏感值过滤 | `memory.py`、`companion_ui.py`；不是完整对话持久化、事件回溯或向量检索 |
 | 阅读与截图解释 | 本地 PDF、选区、手动剪贴板/截图入口、引用和概念卡片 | `reader.py`、`papers.py`、`capture.py`、`agent.py`；外部阅读器自动接入仍有限 |
 | 桌宠与日常工具 | 精灵动作、移动、飞行、休眠、天气问候、番茄钟 | `pet.py`、`sprites.py`、`weather.py`、`focus.py`；机器私有基础宠物资源需本机提供 |
-| 卡牌游戏 | STS2 AI Agent v0.16.2 的本机 HTTP 桥接、动作校验、暂停和用量限制；回合开始整回合规划并按卡名逐步匹配合法动作，意外时重算；战斗开场打法、阶段性构筑回顾；人设台词与语音 | `game.py`、`game_ui.py`、[接入说明](sts2.md)；用户 2026-11-02 实机游玩反馈顺畅（规划前的版本）；回合规划、回顾和游戏语音仅有自动回归，见 [验证记录](validation/2026-11-02-game-planning-voice-usage.md)；不是 Neuro WebSocket 接入 |
+| 卡牌游戏 | STS2 AI Agent v0.16.2 的本机 HTTP 桥接、动作校验、暂停和用量限制；回合开始整回合规划并按卡名逐步匹配合法动作，意外时重算；程序按增益减益计算每张牌的伤害/格挡与本回合最大伤害；战斗开场打法、阶段性构筑回顾（含核心牌）与按流派选牌；地图整条路线规划并按路线前进；赛后复盘与跨局经验；台词只在战斗中说 | `game.py`、`game_analysis.py`、`game_ui.py`、[接入说明](sts2.md)；用户 2026-11-02 实机游玩反馈顺畅（规划前的版本）；之后的功能仅有自动回归，见 [2026-11-06 验证记录](validation/2026-11-06-game-schedule-packaging.md)；伤害按基础值计算，不含回合内新增增益、遗物和特殊卡效果；不是 Neuro WebSocket 接入 |
 | 主动陪伴 | 默认关闭；开启后久别问候与闲时分享，带安静时段、每日上限、冷却、任务中不打扰和“安静两小时” | `companion.py`、`test_companion.py`；自动回归通过，尚无真实模型样本或长时间实机体验 |
 | 语音朗读 | 本地爱弥斯音色逐句合成，首句截短、双路预取、短句复用与启动预热；支持静音和离线识别检查；可切换 MiniMax，支持打断；游戏台词也可朗读；默认关闭，本机已启用本地音色 | `tts.py`、`local_voice_server.py`；2026-11-02 提速改动尚未实测；真实模型样本与首句时间见 [验证记录](validation/2026-10-27-voice-streaming-quality.md)，离线识别是启发式检查；MiniMax 尚无真实服务验收，没有语音输入 |
 | 用量记录 | 共用模型客户端记录每次响应的服务方用量，按日/周/月与用途（对话、游戏、Agent 工作、陪伴与观察、后台整理）汇总显示 | `usage.py`、`usage_ui.py`；只保存计数与标签；不是账单金额，未收到响应的请求不记录 |
+| 日程表 | 本地 SQLite 日程，提前提醒与每天/工作日/每周重复；桌宠（可朗读）和托盘提醒；聊天在用户明确要求时可添加日程，近 7 天日程作为聊天背景 | `schedule.py`、`schedule_ui.py`、`chat.py`；仅自动回归；提醒依赖应用在运行，错过超过 2 小时的单次提醒不再补发；聊天中误加/漏加需要真实模型样本确认 |
+| 版本与更新 | 「版本与更新」页内嵌 `docs/ROADMAP.md` 与 CHANGELOG；PyInstaller 单文件夹打包与 GitHub Actions 发布；打包版从 GitHub Releases 检查、下载、SHA256 校验、退出后替换 `_internal` 与 exe 并重启 | `updater.py`、`updates_ui.py`、`packaging/`、`tools/build_exe.ps1`、`.github/workflows/release.yml`；Linux 上验证了 spec 能构建并启动、下载校验与解压；Windows exe 构建、替换脚本和实际升级未测试；尚未发布 Release，无代码签名；分发前需确认 PyMuPDF（AGPL）等许可 |
 | 定时屏幕观察 | 默认关闭；独立视觉服务观察鼠标所在屏幕并主动说话，共用静默与限额 | `screen_observation.py`、`companion.py`；仅自动回归，真实视觉服务与 Windows 桌面待验收；无通用电脑控制 |
 
 ## 本轮已落实
@@ -45,6 +47,8 @@
 | 天气、专注、提示规则 | `ameath/weather.py`、`ameath/focus.py`、`ameath/policy.py` |
 | 定时屏幕观察 | `ameath/screen_observation.py`、`ameath/companion.py` |
 | 用量记录 | `ameath/usage.py`、`ameath/usage_ui.py`、`ameath/llm.py` |
-| 游戏与安装工具 | `ameath/game.py`、`ameath/game_ui.py`、`integrations/sts2/`、`tools/*sts2*` |
+| 日程表 | `ameath/schedule.py`、`ameath/schedule_ui.py` |
+| 版本、更新与打包 | `ameath/updater.py`、`ameath/updates_ui.py`、`packaging/AmeathAgent.spec`、`tools/build_exe.ps1`、`tools/package_release.py`、`.github/workflows/release.yml` |
+| 游戏与安装工具 | `ameath/game.py`、`ameath/game_analysis.py`、`ameath/game_ui.py`、`integrations/sts2/`、`tools/*sts2*` |
 
 这份映射是当前代码导航，不代表旧规划 BASE-01 中所有权限、语音和真实运行审计已完成。

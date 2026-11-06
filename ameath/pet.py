@@ -137,6 +137,7 @@ class DesktopPet(QWidget):
     lifecycle_finished = Signal(str)
     focus_requested = Signal()
     weather_requested = Signal()
+    schedule_requested = Signal()
 
     def __init__(self, sheet: SpriteSheet | None = None, *, wandering=False, resting=True, flying=True, time_provider=None):
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
@@ -633,6 +634,7 @@ class DesktopPet(QWidget):
         menu.addAction("记忆与人设", self.memory_requested.emit)
         menu.addAction("番茄钟", self.focus_requested.emit)
         menu.addAction("天气与问候", self.weather_requested.emit)
+        menu.addAction("日程表", self.schedule_requested.emit)
         menu.addSeparator()
         actions = menu.addMenu("动作")
         for label, action in [("打个招呼", "waving"), ("跳一下", "jumping"), ("等你回应", "waiting"),

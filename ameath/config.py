@@ -9,6 +9,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
+# The packaged build keeps user data beside the exe; updates replace only the program files.
+DEFAULT_DATA = (Path(sys.executable).resolve().parent / ".local") if getattr(sys, "frozen", False) else ROOT / ".local"
 
 
 @dataclass
@@ -53,6 +55,8 @@ class Settings:
     focus_work_minutes: int = 50
     focus_rest_minutes: int = 10
     focus_cycles: int = 2
+    update_check: bool = True
+    update_repo: str = "Ch1Zume/AmeathAgent"
 
 
 def validate_endpoint(value: str) -> str:
@@ -103,7 +107,7 @@ def _protect(data: bytes, decrypt: bool = False) -> bytes:
 
 class Config:
     def __init__(self, directory: Path | None = None):
-        self.directory = directory or Path(os.environ.get("AMEATH_DATA_DIR", os.environ.get("VIOLET_DATA_DIR", ROOT / ".local")))
+        self.directory = directory or Path(os.environ.get("AMEATH_DATA_DIR", os.environ.get("VIOLET_DATA_DIR", DEFAULT_DATA)))
         self.directory.mkdir(parents=True, exist_ok=True)
         self.path = self.directory / "settings.json"
         self.key_path = self.directory / "credential.dpapi"
@@ -161,6 +165,8 @@ class Config:
                 self.settings.focus_work_minutes = max(1, min(240, int(self.settings.focus_work_minutes)))
                 self.settings.focus_rest_minutes = max(1, min(120, int(self.settings.focus_rest_minutes)))
                 self.settings.focus_cycles = max(1, min(20, int(self.settings.focus_cycles)))
+                if not isinstance(self.settings.update_check, bool) or not isinstance(self.settings.update_repo, str):
+                    raise ValueError("Invalid update settings")
                 if not isinstance(self.settings.weather_enabled, bool) or not isinstance(self.settings.weather_city, str):
                     raise ValueError("Invalid weather settings")
                 for value, bound in [(self.settings.weather_latitude, 90), (self.settings.weather_longitude, 180)]:

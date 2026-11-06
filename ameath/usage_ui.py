@@ -13,6 +13,7 @@ COLORS = {"chat": "#c5497c", "game": "#4f8fbf", "agent": "#d18b2c", "companion":
           "memory": "#8a6fc0", "other": "#a99aa2"}
 DETAIL_LABELS = {"sts2:turn_plan": "杀戮尖塔 2 · 回合规划", "sts2:replan": "杀戮尖塔 2 · 中途重算",
                  "sts2:step": "杀戮尖塔 2 · 单步决策", "sts2:review": "杀戮尖塔 2 · 阶段回顾",
+                 "sts2:route": "杀戮尖塔 2 · 路线规划", "sts2:postmortem": "杀戮尖塔 2 · 赛后复盘",
                  "episodes": "往事整理", "return": "久别问候", "share": "闲时分享", "weather": "天气问候",
                  "screen": "屏幕观察", "explain": "论文讲解与解释", "chat": "聊天回复", "": "—"}
 HISTORY = {"day": 14, "week": 8, "month": 6}
