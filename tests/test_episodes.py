@@ -219,6 +219,8 @@ def test_editor_lists_deletes_and_opting_out_discards_unsummarized_text(live_cha
 
 @pytest.fixture
 def shanghai(monkeypatch):
+    if not hasattr(time, "tzset"):
+        pytest.skip("switching the process time zone through TZ needs time.tzset (not on Windows)")
     monkeypatch.setenv("TZ", "Asia/Shanghai")
     time.tzset()
     yield
