@@ -1,9 +1,10 @@
 # Builds the Windows app. A pushed tag vX.Y.Z publishes a GitHub Release that the in-app
-# updater reads; a manual run only uploads the zip as a workflow artifact.
+# updater reads; pushes to main and manual runs only test, build and upload an artifact.
 name: windows-build
 
 on:
   push:
+    branches: [main]
     tags: ["v*.*.*"]
   workflow_dispatch:
 
@@ -27,9 +28,19 @@ jobs:
           $version = python -c "import ameath; print(ameath.__version__)"
           if ("v$version" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} does not match version $version" }
       - name: Tests
+        shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q --basetemp .tmp/pytest-ci --deselect tests/test_pet.py::test_right_click_commands_expose_sitting_sleeping_waking_and_flight
+          PYTHONIOENCODING: utf-8
+        run: |
+          python -m pytest -q -rfE --tb=line -p no:cacheprovider --basetemp .tmp/pytest-ci `
+            --deselect tests/test_pet.py::test_right_click_commands_expose_sitting_sleeping_waking_and_flight 2>&1 | Tee-Object -FilePath pytest.log
+          $code = $LASTEXITCODE
+          # Failures become annotations so they are readable without opening the log.
+          Select-String -Path pytest.log -Pattern '^(FAILED|ERROR) |Error:|^E ' | Select-Object -First 30 | ForEach-Object {
+            Write-Output ("::error title=pytest::" + $_.Line.Substring(0, [Math]::Min(900, $_.Line.Length)))
+          }
+          exit $code
       - name: Build
         run: python -m PyInstaller packaging/AmeathAgent.spec --noconfirm --clean --distpath dist --workpath .tmp/pyinstaller
       - name: Package
