@@ -6,7 +6,8 @@
 
 | 文件 | 回答的问题 | 更新时机 |
 | --- | --- | --- |
-| [README](../README.md) | 怎么安装、运行和使用？ | 使用方式或对外能力变化 |
+| [README](../README.md) | 一页简介：能做什么、怎么开始、Credits 与许可 | 对外能力、安装方式或致谢变化；保持一页，细节放 GUIDE |
+| [GUIDE](GUIDE.md) | 各功能的完整使用说明、数据范围和已知限制 | 使用方式、数据范围或限制变化 |
 | [STATUS](STATUS.md) | 现在做到哪里，哪些还没验证？ | 一项能力或限制发生实质变化 |
 | [BACKLOG](BACKLOG.md) | 下一步做什么，验收是什么？ | 开始任务、阻塞、验收或优先级变化 |
 | [CHANGELOG](../CHANGELOG.md) | 已经交付了哪些变化？ | 用户可见改动完成后 |
@@ -87,6 +88,61 @@ AM-NNN · 标题
 
 ## 发布与同步
 
-推送前确认远端、分支、暂存文件和忽略规则；初次推送保留 main，后续协作建议按任务开分支。只有用户要求发布或推送时才执行相关远端变更。公开仓库不等于已经选择开源许可证，当前许可状态见 README；不要擅自添加一个许可证代替项目所有者决定。
+推送前确认远端、分支、暂存文件和忽略规则；初次推送保留 main，后续协作建议按任务开分支。只有用户要求发布或推送时才执行相关远端变更。项目自 0.1.0 起以 AGPL-3.0 发布（用户 2026-11-06 决定），第三方组件见 `THIRD-PARTY-NOTICES.md`；更换许可需要项目所有者决定。
 
 Unreleased 汇总尚未打标签的变化。正式发布时同步三个版本入口、把已经验收的条目归入版本节，并记录验证报告；未完成任务留在 BACKLOG。
+
+## 仓库导航与常用命令
+
+以下内容原在 README，2026-11-06 起移到这里；README 只保留面向使用者的简介。
+
+### 项目导航
+
+- [当前开发状态](STATUS.md)：已经实现的能力、代码入口和已知限制。
+- [当前任务台账](BACKLOG.md)：任务状态、下一步、验收条件与证据。
+- [开发流程与记录规范](DEVELOPMENT.md)：每次开发如何更新记录、测试与交接。
+- [变更记录](../CHANGELOG.md)：已完成的用户可见变化。
+- [更新计划](ROADMAP.md)：面向使用者的近期计划，应用内「版本与更新」页显示同一份内容。
+- [开发助手约定](../AGENTS.md)：后续编码工作的仓库规则。
+- [2026-10-26 验证摘要](validation/2026-10-26-initial-sync.md)：本次同步的验证范围。
+
+仓库目录：`ameath/` 为运行代码，`tests/` 为自动化测试，`assets/` 为资源与可导入人设，`tools/` 为开发/桥接工具，`integrations/` 为第三方来源信息，`docs/` 为文档。`.local/`、`.tmp/`、`.venv/` 为本机数据、临时产物和环境，不上传 GitHub。历史规划保留在 `docs/ameath-development-plan-2026-10-26/`，当前进度以 STATUS 和 BACKLOG 为准。
+
+### 开发与检查
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest -q --basetemp .tmp\pytest
+.\.venv\Scripts\python.exe tools\preview.py
+.\.venv\Scripts\python.exe tools\preview_pet.py
+.\.venv\Scripts\python.exe tools\preview_pet_v2.py
+.\.venv\Scripts\python.exe tools\preview_chat.py
+```
+
+检查覆盖阅读选区、原文检索、引用、离线与模型请求分离、本地 HTTP 序列化、重定向阻断、加密凭据、提示节奏、卡片、过期请求隔离，以及逐帧时序、动作优先级、移动、拖拽和屏幕边界。界面检查在独立的离屏画布上进行，只渲染 Ameath 自己，不捕获用户桌面。
+
+`tools/preview.py` 会把应用界面预览写入 `.local/preview/`；这些是开发用界面预览，不是用户的桌面截图。
+
+`tools/preview_pet.py` 使用实际的桌宠播放器和本机 Snowcap 资源，生成 `.local/preview/ameath-snowcap.gif` 及动作联系图。GIF 编码使用开发依赖 Pillow，应用运行不需要 Pillow。
+
+`tools/preview_pet_v2.py` 生成 `.local/preview/ameath-motion-v2.gif`，展示无气泡待机、二维移动、转身、坐下、睡眠、唤醒和完整飞行过程。
+
+`tools/preview_chat.py` 用合成的本地演示数据渲染聊天框、人设卡和长期记忆界面；不调用真实模型，不读取真实聊天记录或捕获桌面。
+
+`tools/preview_game.py` 渲染游戏面板的演示预览；`tools/probe_sts2.py` 只读检查已启动的游戏桥接，不调用模型或执行动作。
+
+### 代码入口
+
+`ameath/app.py` 负责桌面流程；`chat.py` 与 `chat_ui.py` 管理聊天，`memory.py` 与 `companion_ui.py` 管理人设和长期记忆；`sprites.py` 校验和播放精灵图，`pet.py` 管理桌宠绘制、移动与拖拽；`reader.py` 与 `papers.py` 处理阅读与原文；`capture.py` 实现手动选区；`llm.py` 是所有技能共用的模型调用核心，`agent.py` 是阅读技能；`game.py` 与 `game_ui.py` 管理游戏桥接、决策、暂停与用量；`policy.py` 管理提示节奏；`storage.py` 保存卡片；`config.py` 管理配置与加密凭据。
+
+后续工作的状态、优先级和验收统一记录在 [当前任务台账](BACKLOG.md)，阅读器、游戏和角色体验分别按实际证据推进。
+
+### 依赖与分发
+
+本项目的代码以 [GNU AGPL-3.0](../LICENSE) 发布。打包版同时分发 PySide6 / Qt（LGPL-3.0）和 PyMuPDF（AGPL-3.0），各组件的许可与源码位置见 [第三方许可说明](../THIRD-PARTY-NOTICES.md)；打包版的对应源码就是本仓库同版本标签下的代码。
+
+这是非官方的个人同人项目。爱弥斯的名字、人设与相关形象属于原作版权方，不在本项目许可范围内；仓库中的角色资料、生成素材仅供个人学习和娱乐使用。本地语音模型不随仓库或打包版分发。
+
+**打包**：Windows 上运行 `powershell -ExecutionPolicy Bypass -File tools\build_exe.ps1`，得到 `dist\AmeathAgent\AmeathAgent.exe` 和 `dist\AmeathAgent-<版本>-win64.zip(.sha256)`。PyInstaller 配置在 `packaging/AmeathAgent.spec`。
+
+**发布**（应用内更新读取的就是这里）：把 `CHANGELOG.md` 的 Unreleased 整理成 `## <版本>` 小节，同步 `pyproject.toml`、`ameath/__init__.py` 和 README 的版本号，提交后推送标签 `v<版本>`。GitHub Actions（`.github/workflows/release.yml`）会在 Windows 上测试、打包，并创建带 zip 和 `.sha256` 的 Release。手动运行该工作流只生成构建产物，不发布。
