@@ -3,11 +3,16 @@
 # user data stays in `.local` beside the exe.
 from pathlib import Path
 
+from PyInstaller.utils.hooks import copy_metadata
+
 root = Path(SPECPATH).parent
 
 datas = [
     (str(root / "assets"), "assets"),
     (str(root / "CHANGELOG.md"), "."),
+    (str(root / "LICENSE"), "."),
+    (str(root / "THIRD-PARTY-NOTICES.md"), "."),
+    (str(root / "licenses"), "licenses"),
     (str(root / "docs" / "ROADMAP.md"), "docs"),
     (str(root / "docs" / "sts2.md"), "docs"),
     (str(root / "integrations" / "sts2" / "bridge-release.json"), "integrations/sts2"),
@@ -19,6 +24,8 @@ datas = [
     (str(root / "ameath" / "local_voice_inference.py"), "ameath"),
     (str(root / "ameath" / "voice_quality.py"), "ameath"),
 ]
+# Dependency metadata carries their license files (PyMuPDF's COPYING, among others).
+datas += copy_metadata("PyMuPDF") + copy_metadata("PySide6_Essentials") + copy_metadata("shiboken6")
 
 a = Analysis(
     [str(root / "main.py")],

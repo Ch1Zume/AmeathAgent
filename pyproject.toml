@@ -1,8 +1,9 @@
 [project]
 name = "AmeathAgent"
-version = "0.6.1"
+version = "0.1.0"
 description = "A quiet desktop companion for reading papers."
 requires-python = ">=3.11"
+license = "AGPL-3.0-only"
 dependencies = ["PySide6-Essentials>=6.8,<7", "PyMuPDF>=1.26,<2"]
 
 [tool.pytest.ini_options]

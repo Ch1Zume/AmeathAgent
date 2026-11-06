@@ -1,6 +1,6 @@
 # AmeathAgent
 
-Windows 桌面伙伴，v0.6.1 原型。**DeepSeek API 是 Ameath 的统一模型核心**；日常聊天、论文阅读、手动截图解释和《杀戮尖塔 2》游玩共用模型设置；定时屏幕观察使用独立视觉模型。
+Windows 桌面伙伴，v0.1.0。**DeepSeek API 是 Ameath 的统一模型核心**；日常聊天、论文阅读、手动截图解释和《杀戮尖塔 2》游玩共用模型设置；定时屏幕观察使用独立视觉模型。
 
 ## 项目导航
 
@@ -187,7 +187,9 @@ DeepSeek 聊天首轮不启用接口的强制 JSON 模式，以避开本机反�
 
 ## 依赖与分发
 
-使用 Qt for Python / PySide6 和 PyMuPDF。分发二进制前需按实际使用方式遵守各依赖的许可；本项目尚未选择对外发布许可。打包版会把 PySide6（LGPL）和 PyMuPDF（AGPL 或商业许可）一起分发，公开发布 Release 前需要确认许可安排。
+本项目的代码以 [GNU AGPL-3.0](LICENSE) 发布。打包版同时分发 PySide6 / Qt（LGPL-3.0）和 PyMuPDF（AGPL-3.0），各组件的许可与源码位置见 [第三方许可说明](THIRD-PARTY-NOTICES.md)；打包版的对应源码就是本仓库同版本标签下的代码。
+
+这是非官方的个人同人项目。爱弥斯的名字、人设与相关形象属于原作版权方，不在本项目许可范围内；仓库中的角色资料、生成素材仅供个人学习和娱乐使用。本地语音模型不随仓库或打包版分发。
 
 **打包**：Windows 上运行 `powershell -ExecutionPolicy Bypass -File tools\build_exe.ps1`，得到 `dist\AmeathAgent\AmeathAgent.exe` 和 `dist\AmeathAgent-<版本>-win64.zip(.sha256)`。PyInstaller 配置在 `packaging/AmeathAgent.spec`。
 

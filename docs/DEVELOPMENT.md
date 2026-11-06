@@ -73,7 +73,7 @@ AM-NNN · 标题
 
 ## 打包与发布
 
-- 打包配置 `packaging/AmeathAgent.spec`（单文件夹，`_internal` + exe）；Windows 本机用 `tools/build_exe.ps1`，CI 用 `.github/workflows/release.yml`。新增运行时读取的仓库文件（文档、资源）要同时加入 spec 的 `datas`。
+- 打包配置 `packaging/AmeathAgent.spec`（单文件夹，`_internal` + exe）；Windows 本机用 `tools/build_exe.ps1`，CI 用 `.github/workflows/release.yml`。新增运行时读取的仓库文件（文档、资源）要同时加入 spec 的 `datas`。新增打包进 exe 的第三方依赖时，在 `THIRD-PARTY-NOTICES.md` 补充许可与源码位置，并在 spec 中带上其许可文件。
 - 打包版数据目录是 exe 旁的 `.local`；更新只替换 `_internal` 和 exe。不要把运行数据写进 `_internal`。
 - 发布：整理 CHANGELOG 为 `## <版本>` 小节，同步三处版本号，推送 `v<版本>` 标签由 CI 发布。只有用户授权后才推送发布标签。
 
